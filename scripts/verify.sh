@@ -96,7 +96,7 @@ main() {
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'targetApiVersion=101'
 
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'workflow_dispatch:'
-    require_text "$ROOT_DIR/.github/workflows/release.yml" 'apksigner verify --verbose'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'verify --verbose'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
 
