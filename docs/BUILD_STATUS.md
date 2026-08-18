@@ -6,10 +6,10 @@ Updated: 2026-08-19 (AEST).
 
 Pull request: `#1` — `ci/pixelxpert-hardening` → `main`
 
-Latest successful CI evidence:
+Latest successful CI evidence before the release hotfix:
 - workflow: `CI`
-- run: `#25` / run ID `32175960901`
-- tested branch head: `9f610ac53e66f9708ea4e6c865192d6b0b5ac77b`
+- run: `#27` / run ID `32176431435`
+- tested branch head: `43051db2289c6bf27ab4edd10b2913e95ecd0a3c`
 - runner: Ubuntu 24.04
 - JDK: 17
 - Gradle: 9.3.1
@@ -19,18 +19,13 @@ Passed gates:
 - `bash -n scripts/verify.sh`
 - repository/source invariants
 - `:app:testDebugUnitTest`
-- `:app:lintDebug`
-- `:app:assembleDebug`
-- `:app:assembleRelease`
+- Android lint
+- debug/release assembly
 - ephemeral CI-only release signing
-- `apksigner verify` on the signed release-smoke APK
-- explicit debug/release APK output verification
+- `apksigner verify`
+- explicit APK output verification
 - repository cleanliness verification after signing-material cleanup
-- debug APK artifact upload
-- signed release-smoke APK artifact upload
-- lint report artifact upload
-
-This run validates compilation/lint/build integrity for the expanded feature profile, including orientation-aware QS controls, status-bar percent/pixel controls, clock-seconds hook, UDFPS visual hooks, keyguard dim hooks, screenshot-child-process isolation and Android 16 QPR1/QPR2 screenshot-sound fallbacks.
+- debug APK, signed release-smoke APK and lint artifact upload
 
 ## Runtime verification boundary
 
@@ -53,6 +48,39 @@ All newly introduced private targets are optional/fail-soft: a missing class/met
 2. **Injected connectivity lint model** — lint correctly flagged `ConnectivityManager.getActiveNetwork()` as requiring `ACCESS_NETWORK_STATE`. Because the traffic code executes inside the SystemUI host process after libxposed injection, the fix follows PixelXpert's targeted `@SuppressLint("MissingPermission")` model rather than adding a misleading permission to the settings APK; the call is also protected by a runtime exception fallback.
 3. **Screenshot bootloop-strike isolation** — the rapid-restart guard previously keyed only on package name. Screenshot child-process launches could therefore share strike state with main SystemUI. Guard targets are now process-qualified for child processes so `com.android.systemui:screenshot` cannot suppress main-SystemUI hooks.
 
+## Manual release failure #32180427536
+
+The first real manual release run failed before signing/build at **Validate tag and source**:
+
+- requested tag: `v0.1.1`
+- codebase `versionName`: `0.1.0`
+- workflow expectation: requested tag had to equal the already-committed codebase version
+- resulting error: `release tag v0.1.1 does not match versionName; expected v0.1.0`
+
+The same logs also showed that the workflow was wired to retired secret names (`SIGNING_KEY`, `KEY_STORE_PASSWORD`, `ALIAS`) while the repository/environment actually provides:
+
+- `KEYSTORE_BASE64`
+- `KEYSTORE_PASSWORD`
+- `KEY_ALIAS`
+- `KEY_PASSWORD`
+
+The release hotfix changes the contract instead of merely bumping the source manually.
+
+### Corrected manual-release contract
+
+`.github/workflows/release.yml` remains `workflow_dispatch` only and uses the `release` GitHub Environment.
+
+- Blank version input automatically selects the next numeric patch from the current `versionName`.
+- Explicit `0.1.1` or `v0.1.1` selects that version and overwrites source metadata.
+- A new version increments `versionCode` exactly once.
+- If an explicit requested version already equals the unreleased source version, the existing `versionCode` is retained so interrupted publication can be resumed without double-incrementing.
+- Existing Git tags/releases remain immutable.
+- The workflow validates signing secrets and keystore/alias before any source push.
+- It rewrites the Gradle metadata locally, runs source verification, unit tests, release lint, signed release assembly and `apksigner` verification first.
+- Only after those gates pass does it commit `chore(release): prepare vX.Y.Z` and push the metadata change to `main` using `--force-with-lease` against the dispatch source SHA.
+- The GitHub Release is then published from that exact source commit with the signed APK and `SHA256SUMS.txt`.
+- A publication failure after the metadata push is recoverable by rerunning with the same explicit unreleased version.
+
 ## Source-generation checks retained
 
 The repository also keeps:
@@ -61,19 +89,8 @@ The repository also keeps:
 - exact Android/SystemUI/Pixel Launcher scope assertions;
 - no-`NO_CUTOUT` assertion;
 - signing-material/secret residue checks;
+- manual-release secret-name and auto-versioning assertions;
 - requested feature-default assertions;
 - upstream provenance and roadmap requirements.
 
-`SNAPSHOT_MANIFEST.sha256` was intentionally removed. A frozen checksum of the initially generated tree became stale once the repository started evolving; maintained CI is now the authoritative verification gate.
-
-## Manual release boundary
-
-`.github/workflows/release.yml` is intentionally `workflow_dispatch` only. A real signed release has **not** been dispatched in this PR because publication is restricted to the default branch after merge and requires repository release secrets.
-
-Required secrets:
-- `SIGNING_KEY`
-- `KEY_STORE_PASSWORD`
-- `ALIAS`
-- `KEY_PASSWORD`
-
-The release workflow validates `v<versionName>`, builds `assembleRelease`, verifies the APK with `apksigner`, emits `SHA256SUMS.txt`, refuses to overwrite an existing GitHub Release, and cleans signing material in an `always()` step. Its Gradle signing path is exercised on every CI build with an ephemeral CI-only keystore.
+`SNAPSHOT_MANIFEST.sha256` was intentionally removed. Maintained CI is the authoritative verification gate.
