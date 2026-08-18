@@ -12,6 +12,9 @@ import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
 public final class SystemUiResourceHooks {
+    private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
+    private static final String ANDROID_PACKAGE = "android";
+
     private final XposedModule module;
     private final ClassLoader cl;
     private final ModuleConfig config;
@@ -50,14 +53,15 @@ public final class SystemUiResourceHooks {
                     for (int i = 0; i < args.length; i++) {
                         if (!(args[i] instanceof Resources base)) continue;
                         args[i] = new FakeIntegerResource(base, (resources, id) ->
-                                resourceName.equals(HookUtil.resourceEntryName(resources, id))
+                                SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(resources, id))
+                                        && resourceName.equals(HookUtil.resourceEntryName(resources, id))
                                         ? replacement : null);
                         break;
                     }
                     return chain.proceed(args);
                 });
             } catch (Throwable t) {
-                HookUtil.log(module, "QS repository hook failed " + className + ": " + t);
+                HookUtil.logError(module, "QS repository hook failed " + className, t);
             }
         }
     }
@@ -68,16 +72,24 @@ public final class SystemUiResourceHooks {
             module.hook(method).intercept(chain -> {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
+                if (!SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(res, id))) {
+                    return chain.proceed();
+                }
+
                 String name = HookUtil.resourceEntryName(res, id);
                 return switch (name) {
+                    // Global name-filtered fallback for the Compose TileGrid path. The
+                    // constructor-injected wrappers above remain the narrower primary
+                    // path for columns and QQS rows, matching PixelXpert/Iconify.
                     case "quick_settings_paginated_grid_num_rows" -> config.qsRows();
-                    case "quick_settings_min_num_tiles" -> Math.max(config.qsColumns() * config.qsRows(), config.qsColumns());
+                    case "quick_settings_min_num_tiles" ->
+                            Math.max(config.qsColumns() * config.qsRows(), config.qsColumns());
                     case "max_notif_static_icons" -> config.statusBarIconLimit();
                     default -> chain.proceed();
                 };
             });
         } catch (Throwable t) {
-            HookUtil.log(module, "Resources#getInteger hook failed: " + t);
+            HookUtil.logError(module, "Resources#getInteger hook failed", t);
         }
     }
 
@@ -88,9 +100,12 @@ public final class SystemUiResourceHooks {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
                 String name = HookUtil.resourceEntryName(res, id);
+                String pkg = HookUtil.resourcePackageName(res, id);
 
-                if (config.topEdgeStatusBar()) {
-                    if ("status_bar_height".equals(name)) return HookUtil.dp(res, config.statusBarHeightDp());
+                if (config.topEdgeStatusBar() && isSystemBarResourcePackage(pkg)) {
+                    if ("status_bar_height".equals(name)) {
+                        return HookUtil.dp(res, config.statusBarHeightDp());
+                    }
                     if ("status_bar_padding_top".equals(name)
                             || "status_bar_icons_padding_top".equals(name)
                             || "status_bar_icons_padding_bottom".equals(name)) {
@@ -103,6 +118,7 @@ public final class SystemUiResourceHooks {
                 }
 
                 int original = (Integer) chain.proceed();
+                if (!SYSTEMUI_PACKAGE.equals(pkg)) return original;
 
                 if (isQsDensityDimen(name)) {
                     return scale(original, config.qsDensityPercent(), 1);
@@ -116,8 +132,12 @@ public final class SystemUiResourceHooks {
                 return original;
             });
         } catch (Throwable t) {
-            HookUtil.log(module, "Resources#getDimensionPixelSize hook failed: " + t);
+            HookUtil.logError(module, "Resources#getDimensionPixelSize hook failed", t);
         }
+    }
+
+    private static boolean isSystemBarResourcePackage(String pkg) {
+        return SYSTEMUI_PACKAGE.equals(pkg) || ANDROID_PACKAGE.equals(pkg);
     }
 
     private static boolean isQsDensityDimen(String n) {
