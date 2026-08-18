@@ -118,16 +118,27 @@ A green CI build is required before treating a revision as installable.
 
 ## Manual release
 
-`.github/workflows/release.yml` is intentionally **workflow_dispatch-only**. Releases are allowed only from the default branch and the requested tag must exactly match `v<versionName>`.
+`.github/workflows/release.yml` is **workflow_dispatch-only** and follows the same automatic versioning model used by the project's other maintained Android release workflows.
 
-Configure these Actions secrets before the first release:
+Release version behaviour:
 
-- `SIGNING_KEY` — base64-encoded JKS keystore;
-- `KEY_STORE_PASSWORD`;
-- `ALIAS`;
+- leave the version/tag input blank to create the **next patch** from the current `versionName`;
+- enter `0.1.1` or `v0.1.1` to explicitly select that version;
+- a new version increments `versionCode` by one;
+- the workflow rewrites `app/build.gradle.kts`, builds/tests/lints/signs that exact source tree, then commits `chore(release): prepare vX.Y.Z` and pushes it back to `main` using a guarded `--force-with-lease`;
+- if the requested version already equals the unreleased codebase version, the existing `versionCode` is retained, allowing an interrupted publication to be resumed explicitly without incrementing twice;
+- existing Git tags/releases are immutable and are never overwritten.
+
+The release job uses the `release` GitHub Environment and these repository/environment secret names:
+
+- `KEYSTORE_BASE64` — base64-encoded JKS keystore;
+- `KEYSTORE_PASSWORD`;
+- `KEY_ALIAS`;
 - `KEY_PASSWORD`.
 
-The workflow builds and verifies the signed APK, writes `SHA256SUMS.txt`, refuses to overwrite an existing release, publishes via `gh release create`, and removes signing material in an `always()` cleanup step.
+Before changing `main`, the workflow validates all four signing secrets, decodes and inspects the keystore/alias, runs repository verification, unit tests, release lint and a signed release build, and verifies the APK with `apksigner`. Only after those gates pass does it commit/push the source metadata and publish the GitHub Release with `SHA256SUMS.txt`.
+
+If publication itself fails after the metadata commit, rerun the workflow with that explicit unreleased version to resume from the already-updated source metadata. Signing material is removed in an `always()` cleanup step.
 
 ## Install / activate
 
