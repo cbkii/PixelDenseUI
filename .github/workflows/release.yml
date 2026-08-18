@@ -4,9 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag matching app versionName (for example v0.1.0)
-        required: true
-        default: v0.1.0
+        description: Optional version/tag. Blank creates the next patch; explicit 0.1.1 or v0.1.1 overwrites source metadata.
+        required: false
         type: string
       prerelease:
         description: Mark the GitHub Release as a pre-release
@@ -18,34 +17,162 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.event.inputs.tag }}
+  group: manual-release
   cancel-in-progress: false
 
 jobs:
   release:
     name: Build signed APK and publish
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
+    environment: release
     env:
-      RELEASE_TAG: ${{ github.event.inputs.tag }}
-      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-      KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
-      ALIAS: ${{ secrets.ALIAS }}
+      INPUT_TAG: ${{ inputs.tag }}
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - name: Require default branch
         shell: bash
         run: |
+          set +e
+          set +u
+          set +o pipefail
           if [[ "$GITHUB_REF_NAME" != "${{ github.event.repository.default_branch }}" ]]; then
-            printf 'ERROR: releases must be dispatched from the default branch (%s), got %s.\n' \
+            printf 'STOP: releases must be dispatched from the default branch (%s), got %s.\n' \
               '${{ github.event.repository.default_branch }}' "$GITHUB_REF_NAME" >&2
             exit 1
           fi
 
-      - name: Checkout release commit
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          fetch-tags: true
+
+      - name: Require signing secrets
+        shell: bash
+        run: |
+          set +e
+          set +u
+          set +o pipefail
+          missing=0
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              printf 'ERROR: required release secret %s is not configured in repository/environment release.\n' "$name" >&2
+              missing=$((missing + 1))
+            fi
+          done
+          if ((missing > 0)); then
+            exit 1
+          fi
+
+      - name: Resolve version and update source metadata
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set +e
+          set +u
+          set +o pipefail
+
+          source_version=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          source_code=$(sed -n 's/^[[:space:]]*versionCode = \([0-9][0-9]*\).*/\1/p' app/build.gradle.kts | head -n 1)
+          if [[ -z "$source_version" || ! "$source_code" =~ ^[0-9]+$ ]]; then
+            printf 'STOP: unable to resolve versionName/versionCode from app/build.gradle.kts.\n' >&2
+            exit 1
+          fi
+
+          requested=${INPUT_TAG:-}
+          requested=${requested#v}
+          if [[ -z "$requested" ]]; then
+            if [[ ! "$source_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              printf 'STOP: automatic patch increment requires numeric x.y.z source version; found %s.\n' "$source_version" >&2
+              exit 1
+            fi
+            target_version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          else
+            target_version=$requested
+            if [[ ! "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+              printf 'STOP: requested version %s is not a supported semantic version.\n' "$target_version" >&2
+              exit 1
+            fi
+            if [[ "$target_version" != "$source_version" ]]; then
+              highest=$(printf '%s\n%s\n' "$source_version" "$target_version" | sort -V | tail -n 1)
+              if [[ "$highest" != "$target_version" ]]; then
+                printf 'STOP: refusing version downgrade from %s to %s.\n' "$source_version" "$target_version" >&2
+                exit 1
+              fi
+            fi
+          fi
+
+          release_tag="v${target_version}"
+          if git show-ref --tags --verify --quiet "refs/tags/${release_tag}"; then
+            printf 'STOP: git tag %s already exists; releases are immutable.\n' "$release_tag" >&2
+            exit 1
+          fi
+          if gh release view "$release_tag" >/dev/null 2>&1; then
+            printf 'STOP: GitHub Release %s already exists; releases are immutable.\n' "$release_tag" >&2
+            exit 1
+          fi
+
+          target_code=$source_code
+          metadata_changed=false
+          if [[ "$target_version" != "$source_version" ]]; then
+            target_code=$((source_code + 1))
+            metadata_changed=true
+
+            TARGET_VERSION="$target_version" TARGET_CODE="$target_code" python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path("app/build.gradle.kts")
+          text = path.read_text(encoding="utf-8")
+          target_version = os.environ["TARGET_VERSION"]
+          target_code = os.environ["TARGET_CODE"]
+
+          text, code_count = re.subn(
+              r'(?m)^(\s*versionCode\s*=\s*)\d+(\s*)$',
+              rf'\g<1>{target_code}\g<2>',
+              text,
+              count=1,
+          )
+          text, name_count = re.subn(
+              r'(?m)^(\s*versionName\s*=\s*)"[^"]*"(\s*)$',
+              rf'\g<1>"{target_version}"\g<2>',
+              text,
+              count=1,
+          )
+          if code_count != 1 or name_count != 1:
+              print("STOP: expected exactly one versionCode and versionName assignment.", file=sys.stderr)
+              sys.exit(1)
+          path.write_text(text, encoding="utf-8")
+          PY
+            rc=$?
+            if ((rc != 0)); then
+              exit "$rc"
+            fi
+          fi
+
+          if ! bash scripts/verify.sh; then
+            printf 'STOP: repository verification failed after version metadata update.\n' >&2
+            exit 1
+          fi
+
+          {
+            printf 'release_tag=%s\n' "$release_tag"
+            printf 'version_name=%s\n' "$target_version"
+            printf 'version_code=%s\n' "$target_code"
+            printf 'metadata_changed=%s\n' "$metadata_changed"
+            printf 'source_sha=%s\n' "$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+
+          printf 'Release plan: %s (versionCode %s, metadata_changed=%s).\n' \
+            "$release_tag" "$target_code" "$metadata_changed"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v5
@@ -58,110 +185,177 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Validate tag and source
-        shell: bash
-        run: |
-          version_name=$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)
-          if [[ -z "$version_name" ]]; then
-            printf 'ERROR: unable to resolve versionName from app/build.gradle.kts.\n' >&2
-            exit 1
-          fi
-          expected_tag="v${version_name}"
-          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
-            printf 'ERROR: release tag %s does not match versionName; expected %s.\n' "$RELEASE_TAG" "$expected_tag" >&2
-            exit 1
-          fi
-          bash scripts/verify.sh
-
-      - name: Require signing secrets
-        shell: bash
-        run: |
-          missing=0
-          for name in SIGNING_KEY KEY_STORE_PASSWORD ALIAS KEY_PASSWORD; do
-            if [[ -z "${!name:-}" ]]; then
-              printf 'ERROR: required repository secret %s is not configured.\n' "$name" >&2
-              missing=$((missing + 1))
-            fi
-          done
-          if ((missing > 0)); then
-            exit 1
-          fi
-
       - name: Prepare release signing
         shell: bash
         run: |
-          if ! printf '%s' "$SIGNING_KEY" | base64 --decode > ReleaseKey.jks; then
-            printf 'ERROR: SIGNING_KEY is not valid base64 keystore content.\n' >&2
+          set +e
+          set +u
+          set +o pipefail
+
+          if ! printf '%s' "$KEYSTORE_BASE64" | base64 --decode > ReleaseKey.jks; then
+            printf 'STOP: KEYSTORE_BASE64 is not valid base64 keystore content.\n' >&2
+            rm -f ReleaseKey.jks
             exit 1
           fi
           if [[ ! -s ReleaseKey.jks ]]; then
-            printf 'ERROR: decoded release keystore is empty.\n' >&2
+            printf 'STOP: decoded release keystore is empty.\n' >&2
+            rm -f ReleaseKey.jks
+            exit 1
+          fi
+          if ! keytool -list -keystore ReleaseKey.jks -storepass "$KEYSTORE_PASSWORD" \
+              -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            printf 'STOP: keystore password/alias validation failed.\n' >&2
+            rm -f ReleaseKey.jks
             exit 1
           fi
           {
             printf 'storeFile=%s\n' "$GITHUB_WORKSPACE/ReleaseKey.jks"
-            printf 'storePassword=%s\n' "$KEY_STORE_PASSWORD"
-            printf 'keyAlias=%s\n' "$ALIAS"
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
             printf 'keyPassword=%s\n' "$KEY_PASSWORD"
           } > keystore.properties
 
-      - name: Build signed release APK
-        run: >-
-          gradle --no-daemon --stacktrace --warning-mode=all
-          :app:lintRelease
-          :app:assembleRelease
-
-      - name: Verify APK signature and stage assets
+      - name: Build and verify signed release APK
+        id: build
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version_name }}
         shell: bash
         run: |
+          set +e
+          set +u
+          set +o pipefail
+
+          if ! gradle --no-daemon --stacktrace --warning-mode=all \
+              :app:testDebugUnitTest :app:lintRelease :app:assembleRelease; then
+            printf 'STOP: release build/test/lint failed. Source metadata has not been pushed.\n' >&2
+            exit 1
+          fi
+
           apk='app/build/outputs/apk/release/app-release.apk'
           if [[ ! -s "$apk" ]]; then
-            printf 'ERROR: signed release APK was not produced at %s.\n' "$apk" >&2
+            printf 'STOP: signed release APK was not produced at %s.\n' "$apk" >&2
             exit 1
           fi
 
           apksigner=$(find "$ANDROID_HOME/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner -print 2>/dev/null | sort -V | tail -n 1)
           if [[ -z "$apksigner" || ! -x "$apksigner" ]]; then
-            printf 'ERROR: apksigner was not found under ANDROID_HOME/build-tools.\n' >&2
+            printf 'STOP: apksigner was not found under ANDROID_HOME/build-tools.\n' >&2
             exit 1
           fi
-          "$apksigner" verify --verbose "$apk"
+          if ! "$apksigner" verify --verbose --print-certs "$apk"; then
+            printf 'STOP: APK signature verification failed.\n' >&2
+            exit 1
+          fi
 
           mkdir -p dist
           output="dist/PixelDenseUI-${RELEASE_TAG}.apk"
-          cp "$apk" "$output"
-          (cd dist && sha256sum "$(basename "$output")" > SHA256SUMS.txt)
+          if ! cp "$apk" "$output"; then
+            printf 'STOP: failed to stage release APK.\n' >&2
+            exit 1
+          fi
+          if ! (cd dist && sha256sum "$(basename "$output")" > SHA256SUMS.txt); then
+            printf 'STOP: failed to create SHA256SUMS.txt.\n' >&2
+            exit 1
+          fi
+          printf 'apk=%s\n' "$output" >> "$GITHUB_OUTPUT"
 
-      - name: Refuse to overwrite an existing release
+      - name: Commit and push release metadata
+        id: source
         env:
-          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          METADATA_CHANGED: ${{ steps.version.outputs.metadata_changed }}
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
         shell: bash
         run: |
+          set +e
+          set +u
+          set +o pipefail
+
+          release_sha=$(git rev-parse HEAD)
+          if [[ "$METADATA_CHANGED" == 'true' ]]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add app/build.gradle.kts
+            if ! git commit -m "chore(release): prepare ${RELEASE_TAG}"; then
+              printf 'STOP: failed to commit release metadata.\n' >&2
+              exit 1
+            fi
+            release_sha=$(git rev-parse HEAD)
+            if ! git push --force-with-lease="refs/heads/${GITHUB_REF_NAME}:${SOURCE_SHA}" \
+                origin "HEAD:${GITHUB_REF_NAME}"; then
+              printf 'STOP: default branch changed or release metadata push failed; release not published.\n' >&2
+              exit 1
+            fi
+          fi
+          printf 'release_sha=%s\n' "$release_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Recheck immutable release target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+        shell: bash
+        run: |
+          set +e
+          set +u
+          set +o pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            printf 'STOP: git tag %s appeared while release was building.\n' "$RELEASE_TAG" >&2
+            exit 1
+          fi
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            printf 'ERROR: GitHub Release %s already exists.\n' "$RELEASE_TAG" >&2
+            printf 'STOP: GitHub Release %s appeared while release was building.\n' "$RELEASE_TAG" >&2
             exit 1
           fi
 
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          PRERELEASE: ${{ github.event.inputs.prerelease }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+          RELEASE_APK: ${{ steps.build.outputs.apk }}
+          PRERELEASE: ${{ inputs.prerelease }}
         shell: bash
         run: |
+          set +e
+          set +u
+          set +o pipefail
           args=(
             release create "$RELEASE_TAG"
-            "dist/PixelDenseUI-${RELEASE_TAG}.apk"
+            "$RELEASE_APK"
             dist/SHA256SUMS.txt
-            --target "$GITHUB_SHA"
+            --target "$RELEASE_SHA"
             --title "PixelDenseUI ${RELEASE_TAG}"
             --generate-notes
           )
           if [[ "$PRERELEASE" == 'true' ]]; then
             args+=(--prerelease)
           fi
-          gh "${args[@]}"
+          if ! gh "${args[@]}"; then
+            printf 'STOP: GitHub Release publication failed. Source metadata remains committed for explicit-version resume.\n' >&2
+            exit 1
+          fi
+
+      - name: Write release summary
+        if: always()
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          RELEASE_SHA: ${{ steps.source.outputs.release_sha }}
+        shell: bash
+        run: |
+          {
+            printf '## PixelDenseUI manual release\n\n'
+            printf -- '- Result: `%s`\n' "${{ job.status }}"
+            printf -- '- Tag: `%s`\n' "${RELEASE_TAG:-unresolved}"
+            printf -- '- versionName: `%s`\n' "${VERSION_NAME:-unresolved}"
+            printf -- '- versionCode: `%s`\n' "${VERSION_CODE:-unresolved}"
+            printf -- '- Release source: `%s`\n' "${RELEASE_SHA:-not-pushed}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove signing material
         if: always()
         shell: bash
-        run: rm -f ReleaseKey.jks keystore.properties
+        run: |
+          rm -f ReleaseKey.jks keystore.properties
