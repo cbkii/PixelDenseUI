@@ -10,6 +10,7 @@ import dev.pixeldenseui.hooks.FrameworkStatusBarHooks;
 import dev.pixeldenseui.hooks.HookUtil;
 import dev.pixeldenseui.hooks.LauncherHooks;
 import dev.pixeldenseui.hooks.SystemUiHooks;
+import dev.pixeldenseui.safety.BootLoopProtector;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
@@ -30,25 +31,60 @@ public final class ModuleMain extends XposedModule {
 
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
-        ModuleConfig config = config();
-        new FrameworkStatusBarHooks(this, param.getClassLoader(), config).install();
+        SharedPreferences prefs = preferencesOrNull();
+        if (BootLoopProtector.shouldSkip(prefs, "android")) {
+            HookUtil.logWarning(this, "bootloop guard: skipping android/system_server hooks for this restart window");
+            return;
+        }
+
+        ModuleConfig config = new ModuleConfig(prefs);
+        HookUtil.installSafely(this, "framework status-bar hooks",
+                () -> new FrameworkStatusBarHooks(this, param.getClassLoader(), config).install());
     }
 
     @Override
     public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
         if (!param.isFirstPackage()) return;
-        ModuleConfig config = config();
-        switch (param.getPackageName()) {
+
+        String packageName = param.getPackageName();
+        if (!"com.android.systemui".equals(packageName)
+                && !"com.google.android.apps.nexuslauncher".equals(packageName)) {
+            return;
+        }
+
+        SharedPreferences prefs = preferencesOrNull();
+        String guardTarget = guardTarget(packageName, processName);
+        if (BootLoopProtector.shouldSkip(prefs, guardTarget)) {
+            HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + guardTarget
+                    + " in this restart window");
+            return;
+        }
+
+        ModuleConfig config = new ModuleConfig(prefs);
+        switch (packageName) {
             case "com.android.systemui" ->
-                    new SystemUiHooks(this, param.getClassLoader(), config).install();
+                    HookUtil.installSafely(this, "SystemUI hook coordinator",
+                            () -> new SystemUiHooks(this, param.getClassLoader(), config, processName).install());
             case "com.google.android.apps.nexuslauncher" ->
-                    new LauncherHooks(this, param.getClassLoader(), config).install();
+                    HookUtil.installSafely(this, "Pixel Launcher hooks",
+                            () -> new LauncherHooks(this, param.getClassLoader(), config).install());
             default -> { }
         }
     }
 
-    private ModuleConfig config() {
-        SharedPreferences prefs = getRemotePreferences(ModuleConfig.PREF_FILE);
-        return new ModuleConfig(prefs);
+    private static String guardTarget(String packageName, String processName) {
+        if (processName == null || processName.isBlank() || processName.equals(packageName)) {
+            return packageName;
+        }
+        return packageName + "@" + processName;
+    }
+
+    private SharedPreferences preferencesOrNull() {
+        try {
+            return getRemotePreferences(ModuleConfig.PREF_FILE);
+        } catch (Throwable t) {
+            HookUtil.logWarning(this, "remote preferences unavailable; using built-in defaults: " + t);
+            return null;
+        }
     }
 }

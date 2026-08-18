@@ -1,6 +1,18 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
 }
+
+val releasePropertiesFile = rootProject.file("keystore.properties")
+val releaseProperties = Properties()
+val hasReleaseSigning = releasePropertiesFile.isFile
+if (hasReleaseSigning) {
+    releasePropertiesFile.inputStream().use { releaseProperties.load(it) }
+}
+
+fun releaseProperty(name: String): String =
+    releaseProperties.getProperty(name) ?: error("Missing release signing property: $name")
 
 android {
     namespace = "dev.pixeldenseui"
@@ -14,10 +26,24 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseProperty("storeFile"))
+                storePassword = releaseProperty("storePassword")
+                keyAlias = releaseProperty("keyAlias")
+                keyPassword = releaseProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -30,4 +56,5 @@ android {
 dependencies {
     compileOnly("io.github.libxposed:api:101.0.1")
     implementation("io.github.libxposed:service:101.0.0")
+    testImplementation("junit:junit:4.13.2")
 }

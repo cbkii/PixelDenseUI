@@ -6,12 +6,16 @@
  */
 package dev.pixeldenseui.hooks;
 
+import android.content.res.Configuration;
 import android.content.res.Resources;
 
 import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
 public final class SystemUiResourceHooks {
+    private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
+    private static final String ANDROID_PACKAGE = "android";
+
     private final XposedModule module;
     private final ClassLoader cl;
     private final ModuleConfig config;
@@ -33,14 +37,14 @@ public final class SystemUiResourceHooks {
         hookResourceConstructor(
                 "com.android.systemui.qs.panels.data.repository.QSColumnsRepository",
                 "quick_settings_infinite_grid_num_columns",
-                config.qsColumns());
+                resources -> isLandscape(resources) ? config.qsColumnsLandscape() : config.qsColumns());
         hookResourceConstructor(
                 "com.android.systemui.qs.panels.data.repository.QuickQuickSettingsRowRepository",
                 "quick_qs_paginated_grid_num_rows",
-                config.qqsRows());
+                resources -> isLandscape(resources) ? config.qqsRowsLandscape() : config.qqsRows());
     }
 
-    private void hookResourceConstructor(String className, String resourceName, int replacement) {
+    private void hookResourceConstructor(String className, String resourceName, IntReplacement replacement) {
         Class<?> cls = HookUtil.findClass(cl, className);
         if (cls == null) return;
         for (var ctor : HookUtil.constructors(cls)) {
@@ -49,15 +53,20 @@ public final class SystemUiResourceHooks {
                     Object[] args = chain.getArgs().toArray();
                     for (int i = 0; i < args.length; i++) {
                         if (!(args[i] instanceof Resources base)) continue;
-                        args[i] = new FakeIntegerResource(base, (resources, id) ->
-                                resourceName.equals(HookUtil.resourceEntryName(resources, id))
-                                        ? replacement : null);
+                        args[i] = new FakeIntegerResource(base, (resources, id) -> {
+                            if (!SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(resources, id))
+                                    || !resourceName.equals(HookUtil.resourceEntryName(resources, id))) {
+                                return null;
+                            }
+                            int value = replacement.value(resources);
+                            return value > 0 ? value : null;
+                        });
                         break;
                     }
                     return chain.proceed(args);
                 });
             } catch (Throwable t) {
-                HookUtil.log(module, "QS repository hook failed " + className + ": " + t);
+                HookUtil.logError(module, "QS repository hook failed " + className, t);
             }
         }
     }
@@ -68,16 +77,31 @@ public final class SystemUiResourceHooks {
             module.hook(method).intercept(chain -> {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
+                if (!SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(res, id))) {
+                    return chain.proceed();
+                }
+
                 String name = HookUtil.resourceEntryName(res, id);
+                boolean landscape = isLandscape(res);
+                int rows = landscape ? config.qsRowsLandscape() : config.qsRows();
+                int cols = landscape ? config.qsColumnsLandscape() : config.qsColumns();
+
                 return switch (name) {
-                    case "quick_settings_paginated_grid_num_rows" -> config.qsRows();
-                    case "quick_settings_min_num_tiles" -> Math.max(config.qsColumns() * config.qsRows(), config.qsColumns());
+                    // Global name-filtered fallback for the Compose TileGrid path. A
+                    // landscape value of 0 deliberately preserves SystemUI's row count.
+                    case "quick_settings_paginated_grid_num_rows" ->
+                            rows > 0 ? rows : chain.proceed();
+                    case "quick_settings_min_num_tiles" -> {
+                        int original = (Integer) chain.proceed();
+                        int minimum = rows > 0 ? rows * cols : cols;
+                        yield Math.max(original, minimum);
+                    }
                     case "max_notif_static_icons" -> config.statusBarIconLimit();
                     default -> chain.proceed();
                 };
             });
         } catch (Throwable t) {
-            HookUtil.log(module, "Resources#getInteger hook failed: " + t);
+            HookUtil.logError(module, "Resources#getInteger hook failed", t);
         }
     }
 
@@ -88,13 +112,17 @@ public final class SystemUiResourceHooks {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
                 String name = HookUtil.resourceEntryName(res, id);
+                String pkg = HookUtil.resourcePackageName(res, id);
+                int original = (Integer) chain.proceed();
 
-                if (config.topEdgeStatusBar()) {
-                    if ("status_bar_height".equals(name)) return HookUtil.dp(res, config.statusBarHeightDp());
+                if (config.topEdgeStatusBar() && isSystemBarResourcePackage(pkg)) {
+                    if ("status_bar_height".equals(name)) {
+                        return scale(original, config.statusBarHeightPercent(), 1);
+                    }
                     if ("status_bar_padding_top".equals(name)
                             || "status_bar_icons_padding_top".equals(name)
                             || "status_bar_icons_padding_bottom".equals(name)) {
-                        return HookUtil.dp(res, config.statusBarTopPaddingDp());
+                        return config.statusBarTopPaddingPx();
                     }
                     if ("status_bar_system_icon_spacing".equals(name)
                             || "status_bar_icon_horizontal_margin".equals(name)) {
@@ -102,7 +130,7 @@ public final class SystemUiResourceHooks {
                     }
                 }
 
-                int original = (Integer) chain.proceed();
+                if (!SYSTEMUI_PACKAGE.equals(pkg)) return original;
 
                 if (isQsDensityDimen(name)) {
                     return scale(original, config.qsDensityPercent(), 1);
@@ -116,14 +144,23 @@ public final class SystemUiResourceHooks {
                 return original;
             });
         } catch (Throwable t) {
-            HookUtil.log(module, "Resources#getDimensionPixelSize hook failed: " + t);
+            HookUtil.logError(module, "Resources#getDimensionPixelSize hook failed", t);
         }
+    }
+
+    private static boolean isLandscape(Resources resources) {
+        return resources.getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+    }
+
+    private static boolean isSystemBarResourcePackage(String pkg) {
+        return SYSTEMUI_PACKAGE.equals(pkg) || ANDROID_PACKAGE.equals(pkg);
     }
 
     private static boolean isQsDensityDimen(String n) {
         return switch (n) {
             case "qs_tile_margin_horizontal",
                  "qs_tile_margin_vertical",
+                 "qs_tile_padding",
                  "qs_panel_padding",
                  "qs_panel_padding_top",
                  "qs_content_horizontal_padding",
@@ -178,5 +215,9 @@ public final class SystemUiResourceHooks {
 
     private static int scale(int px, int percent, int floorPx) {
         return Math.max(floorPx, Math.round(px * percent / 100f));
+    }
+
+    private interface IntReplacement {
+        int value(Resources resources);
     }
 }

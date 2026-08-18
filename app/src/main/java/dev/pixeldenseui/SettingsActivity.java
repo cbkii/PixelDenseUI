@@ -7,7 +7,6 @@ import android.app.Activity;
 import android.content.SharedPreferences;
 import android.graphics.Typeface;
 import android.os.Bundle;
-import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -37,7 +36,7 @@ public final class SettingsActivity extends Activity {
 
         TextView title = text("Pixel Dense UI", 24, true);
         content.addView(title);
-        content.addView(text("One focused module for Pixel taskbar, top-edge status bar, dense Quick Settings and compact notifications.", 14, false));
+        content.addView(text("Focused Pixel SystemUI density, status-bar, lockscreen and taskbar controls.", 14, false));
         status = text("Connecting to the Xposed service…", 13, false);
         content.addView(status);
 
@@ -64,24 +63,41 @@ public final class SettingsActivity extends Activity {
         toggle("Enable Pixel taskbar", "taskbar_enabled", true);
 
         section("Top-edge status bar");
-        toggle("Force compact top-edge status bar", "top_edge_statusbar", true);
+        toggle("Force top-edge status bar", "top_edge_statusbar", true);
         toggle("Clamp top cutout safe inset to bar height", "clamp_cutout_safe_inset", true);
-        seek("Status bar height", "statusbar_height_dp", 20, 18, 32, " dp");
-        seek("Top content padding", "statusbar_top_padding_dp", 0, 0, 4, " dp");
+        seek("Status bar height", "statusbar_height_percent", 100, 50, 150, "% of stock");
+        seek("Start padding (-1 = stock)", "statusbar_padding_start_px", -1, -1, 240, " px");
+        seek("End padding (-1 = stock)", "statusbar_padding_end_px", -1, -1, 240, " px");
+        seek("Top content padding", "statusbar_top_padding_px", 0, 0, 48, " px");
         seek("Vertical offset", "statusbar_y_offset_dp", 0, -4, 4, " dp");
         seek("System icon spacing", "statusbar_icon_spacing_dp", 1, 0, 8, " dp");
         seek("Notification icons visible", "statusbar_icon_limit", 8, 4, 14, "");
 
         section("Clock and traffic");
         seek("Clock position (0 stock / 1 left / 2 right)", "clock_position", 1, 0, 2, "");
+        toggle("Display clock seconds", "clock_show_seconds", true);
         toggle("Show upload/download speed", "network_traffic_enabled", true);
         seek("Auto-hide below", "network_autohide_kb", 1, 0, 64, " KB/s");
 
-        section("Quick Settings");
-        seek("QS rows", "qs_rows", 3, 1, 6, "");
-        seek("Quick-QS rows", "qqs_rows", 2, 1, 4, "");
-        seek("QS columns", "qs_columns", 4, 2, 8, "");
-        seek("QS spacing density", "qs_density_percent", 78, 60, 100, "%");
+        section("Quick Settings — portrait");
+        seek("QS sizing / spacing", "qs_density_percent", 50, 25, 100, "%");
+        seek("Quick rows", "qqs_rows", 3, 1, 6, "");
+        seek("Full rows", "qs_rows", 4, 1, 8, "");
+        seek("Columns", "qs_columns", 7, 2, 16, "");
+
+        section("Quick Settings — landscape");
+        content.addView(text("Row value 0 keeps SystemUI's landscape default.", 13, false));
+        seek("Quick rows", "qqs_rows_landscape", 0, 0, 6, "");
+        seek("Full rows", "qs_rows_landscape", 0, 0, 8, "");
+        seek("Columns", "qs_columns_landscape", 12, 2, 16, "");
+
+        section("Lock screen");
+        toggle("Hide fingerprint background circle", "hide_fingerprint_circle", true);
+        toggle("Hide fingerprint icon", "hide_fingerprint_icon", true);
+        seek("Keyguard wallpaper dim", "keyguard_wallpaper_dim_percent", 66, 0, 100, "%");
+
+        section("Screenshot");
+        toggle("Disable screenshot sound", "disable_screenshot_sound", true);
 
         section("Notifications");
         seek("Normal collapsed-row density", "notification_density_percent", 72, 55, 100, "%");
@@ -90,8 +106,8 @@ public final class SettingsActivity extends Activity {
         seek("Silent notification icon size", "silent_notification_icon_percent", 72, 50, 100, "%");
 
         section("Apply");
-        content.addView(text("Most changes require SystemUI/Pixel Launcher process recreation; reboot is the deterministic boundary for v0.1.", 13, false));
-        content.addView(text("The centre clock is intentionally omitted because this build targets a centre punch-hole Pixel.", 13, false));
+        content.addView(text("SystemUI, lockscreen and screenshot-process hook changes are applied deterministically after process recreation; reboot is the clean validation boundary.", 13, false));
+        content.addView(text("Status-bar ignored-icon selection is intentionally roadmap-only until the Android 16 slot pipeline is validated independently of PixelXpert's unreliable container mutation path.", 13, false));
     }
 
     private void section(String name) {

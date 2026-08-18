@@ -1,8 +1,8 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-only
  *
- * Clock relocation, icon-limit model and traffic placement are based on the
- * corresponding PixelXpert SystemUI implementation, reduced for PixelDenseUI.
+ * Clock relocation/seconds, icon-limit model and traffic placement are based on
+ * the corresponding PixelXpert SystemUI implementation, reduced for PixelDenseUI.
  */
 package dev.pixeldenseui.hooks;
 
@@ -49,28 +49,33 @@ public final class StatusBarHooks {
             return result;
         });
 
-        hookIconLimitModels();
+        hookClockSeconds();
+        hookIconLimitModel();
         HookUtil.log(module, "status-bar view hooks installed");
     }
 
-    private void hookIconLimitModels() {
-        for (String name : new String[]{
-                "com.android.systemui.statusbar.notification.icon.ui.viewmodel.NotificationIconContainerStatusBarViewModel",
-                "com.android.systemui.statusbar.notification.icon.ui.viewmodel.NotificationIconContainerAlwaysOnDisplayViewModel"
-        }) {
-            Class<?> cls = HookUtil.findClass(cl, name);
-            if (cls == null) continue;
-            for (var ctor : HookUtil.constructors(cls)) {
-                try {
-                    module.hook(ctor).intercept(chain -> {
-                        Object result = chain.proceed();
-                        Object obj = chain.getThisObject();
-                        if (obj != null && name.contains("StatusBar")) {
-                            HookUtil.setField(obj, "maxIcons", config.statusBarIconLimit());
-                        }
-                        return result;
-                    });
-                } catch (Throwable ignored) {}
+    private void hookClockSeconds() {
+        Class<?> clock = HookUtil.findClass(cl, "com.android.systemui.statusbar.policy.Clock");
+        HookUtil.hookAll(module, clock, "getSmallTime", chain -> {
+            HookUtil.setField(chain.getThisObject(), "mShowSeconds", config.clockShowSeconds());
+            return chain.proceed();
+        });
+    }
+
+    private void hookIconLimitModel() {
+        String name = "com.android.systemui.statusbar.notification.icon.ui.viewmodel.NotificationIconContainerStatusBarViewModel";
+        Class<?> cls = HookUtil.findClass(cl, name);
+        if (cls == null) return;
+        for (var ctor : HookUtil.constructors(cls)) {
+            try {
+                module.hook(ctor).intercept(chain -> {
+                    Object result = chain.proceed();
+                    Object obj = chain.getThisObject();
+                    if (obj != null) HookUtil.setField(obj, "maxIcons", config.statusBarIconLimit());
+                    return result;
+                });
+            } catch (Throwable t) {
+                HookUtil.logError(module, "status-bar icon-limit constructor hook failed", t);
             }
         }
     }
@@ -86,13 +91,17 @@ public final class StatusBarHooks {
             }
             if (config.networkTrafficEnabled()) ensureTraffic(root, clock);
         } catch (Throwable t) {
-            HookUtil.log(module, "status-bar apply skipped: " + t);
+            HookUtil.logWarning(module, "status-bar apply skipped: " + t);
         }
     }
 
     private void applyTopEdge(View root) {
-        int height = HookUtil.dp(root.getResources(), config.statusBarHeightDp());
-        int topPad = HookUtil.dp(root.getResources(), config.statusBarTopPaddingDp());
+        int fallback = root.getHeight() > 0 ? root.getHeight() : HookUtil.dp(root.getResources(), 24);
+        int height = HookUtil.scaledSystemDimensionPx(
+                root.getResources(), "status_bar_height", config.statusBarHeightPercent(), fallback);
+        int topPad = config.statusBarTopPaddingPx();
+        int startPad = config.statusBarPaddingStartPx();
+        int endPad = config.statusBarPaddingEndPx();
         int yOffset = HookUtil.dp(root.getResources(), config.statusBarYOffsetDp());
 
         ViewGroup.LayoutParams rootLp = root.getLayoutParams();
@@ -116,7 +125,15 @@ public final class StatusBarHooks {
         }) {
             View child = HookUtil.findByName(root, id);
             if (child == null) continue;
-            child.setPadding(child.getPaddingLeft(), topPad, child.getPaddingRight(), topPad);
+
+            if ("status_bar_contents".equals(id)) {
+                int start = startPad < 0 ? child.getPaddingStart() : startPad;
+                int end = endPad < 0 ? child.getPaddingEnd() : endPad;
+                child.setPaddingRelative(start, topPad, end, 0);
+            } else {
+                child.setPadding(child.getPaddingLeft(), topPad, child.getPaddingRight(), 0);
+            }
+
             ViewGroup.LayoutParams lp = child.getLayoutParams();
             if (lp instanceof FrameLayout.LayoutParams flp) {
                 flp.gravity = (flp.gravity & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP;
@@ -161,7 +178,6 @@ public final class StatusBarHooks {
         }
         controller.syncTint(clock);
         View traffic = controller.view();
-        if (traffic.getParent() != null) return;
 
         ViewGroup target = null;
         if (config.clockPosition() == 2) {
@@ -172,6 +188,27 @@ public final class StatusBarHooks {
             target = HookUtil.findByName(root, "status_bar_start_side_except_heads_up");
             if (target == null) target = HookUtil.findByName(root, "status_bar_start_side_content");
         }
-        if (target != null) target.addView(traffic);
+        if (target == null) return;
+
+        if (traffic.getParent() == target) return;
+        if (traffic.getParent() instanceof ViewGroup old) old.removeView(traffic);
+        applyParentCompatibleLayoutParams(traffic, target);
+        target.addView(traffic);
+    }
+
+    private static void applyParentCompatibleLayoutParams(View child, ViewGroup parent) {
+        int width = ViewGroup.LayoutParams.WRAP_CONTENT;
+        int height = ViewGroup.LayoutParams.MATCH_PARENT;
+        if (parent instanceof LinearLayout) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, height);
+            lp.gravity = Gravity.TOP;
+            child.setLayoutParams(lp);
+        } else if (parent instanceof FrameLayout) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, height);
+            lp.gravity = Gravity.TOP;
+            child.setLayoutParams(lp);
+        } else {
+            child.setLayoutParams(new ViewGroup.LayoutParams(width, height));
+        }
     }
 }
