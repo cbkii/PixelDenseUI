@@ -53,8 +53,10 @@ public final class ModuleMain extends XposedModule {
         }
 
         SharedPreferences prefs = preferencesOrNull();
-        if (BootLoopProtector.shouldSkip(prefs, packageName)) {
-            HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + packageName + " in this restart window");
+        String guardTarget = guardTarget(packageName, processName);
+        if (BootLoopProtector.shouldSkip(prefs, guardTarget)) {
+            HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + guardTarget
+                    + " in this restart window");
             return;
         }
 
@@ -62,12 +64,19 @@ public final class ModuleMain extends XposedModule {
         switch (packageName) {
             case "com.android.systemui" ->
                     HookUtil.installSafely(this, "SystemUI hook coordinator",
-                            () -> new SystemUiHooks(this, param.getClassLoader(), config).install());
+                            () -> new SystemUiHooks(this, param.getClassLoader(), config, processName).install());
             case "com.google.android.apps.nexuslauncher" ->
                     HookUtil.installSafely(this, "Pixel Launcher hooks",
                             () -> new LauncherHooks(this, param.getClassLoader(), config).install());
             default -> { }
         }
+    }
+
+    private static String guardTarget(String packageName, String processName) {
+        if (processName == null || processName.isBlank() || processName.equals(packageName)) {
+            return packageName;
+        }
+        return packageName + "@" + processName;
     }
 
     private SharedPreferences preferencesOrNull() {

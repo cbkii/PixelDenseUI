@@ -15,10 +15,7 @@ ROOT_DIR=$(cd -- "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd -P) || {
 errors=0
 checks=0
 
-pass() {
-    checks=$((checks + 1))
-}
-
+pass() { checks=$((checks + 1)); }
 fail() {
     checks=$((checks + 1))
     errors=$((errors + 1))
@@ -27,40 +24,24 @@ fail() {
 
 require_file() {
     local rel=${1:-}
-    if [[ -n $rel && -s "$ROOT_DIR/$rel" ]]; then
-        pass
-    else
-        fail "Missing required file: ${rel:-<empty path>}"
-    fi
+    if [[ -n $rel && -s "$ROOT_DIR/$rel" ]]; then pass; else fail "Missing required file: ${rel:-<empty path>}"; fi
 }
 
 require_absent() {
     local rel=${1:-}
-    if [[ -n $rel && ! -e "$ROOT_DIR/$rel" ]]; then
-        pass
-    else
-        fail "File must not be committed/present: ${rel:-<empty path>}"
-    fi
+    if [[ -n $rel && ! -e "$ROOT_DIR/$rel" ]]; then pass; else fail "File must not be committed/present: ${rel:-<empty path>}"; fi
 }
 
 require_exact_line() {
     local file=${1:-}
     local expected=${2:-}
-    if grep -Fxq -- "$expected" "$file" 2>/dev/null; then
-        pass
-    else
-        fail "Expected line '$expected' not found in ${file#$ROOT_DIR/}"
-    fi
+    if grep -Fxq -- "$expected" "$file" 2>/dev/null; then pass; else fail "Expected line '$expected' not found in ${file#$ROOT_DIR/}"; fi
 }
 
 require_text() {
     local file=${1:-}
     local expected=${2:-}
-    if grep -Fq -- "$expected" "$file" 2>/dev/null; then
-        pass
-    else
-        fail "Expected text '$expected' not found in ${file#$ROOT_DIR/}"
-    fi
+    if grep -Fq -- "$expected" "$file" 2>/dev/null; then pass; else fail "Expected text '$expected' not found in ${file#$ROOT_DIR/}"; fi
 }
 
 main() {
@@ -75,6 +56,8 @@ main() {
         app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java \
         app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java \
+        app/src/main/java/dev/pixeldenseui/hooks/LockscreenHooks.java \
+        app/src/main/java/dev/pixeldenseui/hooks/ScreenshotHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/LauncherHooks.java \
         app/src/main/resources/META-INF/xposed/java_init.list \
@@ -85,6 +68,8 @@ main() {
         LICENSE \
         docs/UPSTREAM.md \
         docs/APK_EVIDENCE.md \
+        docs/ROADMAP.md \
+        docs/STATUS_BAR_INSET_POLICY.md \
         NOTICE.md; do
         require_file "$rel"
     done
@@ -99,6 +84,10 @@ main() {
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'verify --verbose'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_density_percent", 50)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns_landscape", 12)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("keyguard_wallpaper_dim_percent", 66)'
+    require_text "$ROOT_DIR/docs/ROADMAP.md" 'Status-bar ignored icons'
 
     require_absent 'ReleaseKey.jks'
     require_absent 'keystore.properties'
@@ -118,18 +107,14 @@ main() {
     fi
 
     java_count=$(find "$ROOT_DIR/app/src/main/java" -type f -name '*.java' -print | wc -l)
-    if [[ $java_count =~ ^[0-9]+$ ]] && ((java_count >= 11)); then
+    if [[ $java_count =~ ^[0-9]+$ ]] && ((java_count >= 13)); then
         pass
     else
         fail "Unexpected Java source count: $java_count"
     fi
 
     printf '\n==================================================\n'
-    if ((errors == 0)); then
-        printf 'RESULT:       SUCCESS\n'
-    else
-        printf 'RESULT:       FAILED\n'
-    fi
+    if ((errors == 0)); then printf 'RESULT:       SUCCESS\n'; else printf 'RESULT:       FAILED\n'; fi
     printf 'CHECKS:       %d\n' "$checks"
     printf 'ERRORS:       %d\n' "$errors"
     printf 'JAVA SOURCES: %s\n' "$java_count"
@@ -137,6 +122,7 @@ main() {
     printf 'LIBXPOSED:    API 101\n'
     printf 'CUTOUT MODE:  retain + clamp (no removal)\n'
     printf 'RELEASE:      workflow_dispatch + signed APK\n'
+    printf 'FEATURE SET:  QS profile + statusbar + lockscreen + screenshot\n'
     printf '==================================================\n'
 
     ((errors == 0))

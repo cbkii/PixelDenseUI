@@ -1,27 +1,42 @@
 # Status-bar / camera-hole inset policy
 
-Goal: put status content at the physical **top edge**, as far above/alongside the Pixel 9a centre punch-hole as practical.
+Goal: keep status content at the physical **top edge** while preserving the real centre-camera cutout model.
 
-## What v0.1 changes
+## Height model
 
-- Framework status-bar height (`SystemBarUtils`).
-- The top `DisplayCutout` safe inset and top-bound bottom edge are clamped to the selected compact status-bar height.
-- SystemUI's `PhoneStatusBarView` receives the same compact height.
-- SystemUI content top padding defaults to 0 dp.
+Pixel Dense UI no longer substitutes a fixed dp height. It scales the stock Android/SystemUI status-bar height by the configured **percentage** (50–150%).
 
-## What v0.1 does not do
+- `SystemBarUtils.getStatusBarHeight*()` results are scaled from their platform values.
+- SystemUI's `status_bar_height` resource/view receives the same percentage.
+- The top `DisplayCutout` safe inset and top-bound bottom edge are clamped to the same scaled height.
+
+This mirrors PixelXpert's percentage-size model while retaining Pixel Dense UI's stricter cutout policy.
+
+## Pixel padding model
+
+Status-bar layout exposes raw-pixel controls:
+
+- start padding: `-1` = preserve current stock value, otherwise 0–240 px;
+- end padding: `-1` = preserve current stock value, otherwise 0–240 px;
+- top content padding: 0–48 px.
+
+Start/end padding is applied to `status_bar_contents` after `PhoneStatusBarView` layout/height updates. Top padding is also applied to the targeted status content/icon containers.
+
+Raw px is intentional here: these controls are for exact physical placement around the target display/camera geometry rather than density-independent app layout.
+
+## What the module does not do
 
 - It never returns `DisplayCutout.NO_CUTOUT`.
-- It does not remove the centre cutout object.
-- It does not horizontally force icons through the camera region.
-- It does not spoof display resolution or density.
+- It does not remove or fake the centre cutout object.
+- It does not intentionally force icons through the camera region.
+- It does not spoof display resolution or global density.
 
-This is a deliberate refinement of PixelXpert's `StatusbarSize`: use its proven height/cutout clamp, but exclude its more aggressive no-cutout mode.
+## Defaults
 
-## Default
+- height: **100% of stock**;
+- start padding: stock (`-1`);
+- end padding: stock (`-1`);
+- top padding: **0 px**;
+- Y offset: **0 dp**.
 
-- height: 20 dp
-- top padding: 0 dp
-- Y offset: 0 dp
-
-Only use a negative Y offset after confirming the 20 dp / 0 dp baseline; a negative translation can clip glyphs at the physical display boundary.
+The height default is deliberately conservative because no preferred percentage has been specified. Change one value at a time during physical validation; validate height/cutout alignment before changing start/end/top padding or Y offset.

@@ -1,8 +1,8 @@
 /*
  * SPDX-License-Identifier: GPL-3.0-only
  *
- * Clock relocation, icon-limit model and traffic placement are based on the
- * corresponding PixelXpert SystemUI implementation, reduced for PixelDenseUI.
+ * Clock relocation/seconds, icon-limit model and traffic placement are based on
+ * the corresponding PixelXpert SystemUI implementation, reduced for PixelDenseUI.
  */
 package dev.pixeldenseui.hooks;
 
@@ -49,8 +49,17 @@ public final class StatusBarHooks {
             return result;
         });
 
+        hookClockSeconds();
         hookIconLimitModel();
         HookUtil.log(module, "status-bar view hooks installed");
+    }
+
+    private void hookClockSeconds() {
+        Class<?> clock = HookUtil.findClass(cl, "com.android.systemui.statusbar.policy.Clock");
+        HookUtil.hookAll(module, clock, "getSmallTime", chain -> {
+            HookUtil.setField(chain.getThisObject(), "mShowSeconds", config.clockShowSeconds());
+            return chain.proceed();
+        });
     }
 
     private void hookIconLimitModel() {
@@ -87,8 +96,12 @@ public final class StatusBarHooks {
     }
 
     private void applyTopEdge(View root) {
-        int height = HookUtil.dp(root.getResources(), config.statusBarHeightDp());
-        int topPad = HookUtil.dp(root.getResources(), config.statusBarTopPaddingDp());
+        int fallback = root.getHeight() > 0 ? root.getHeight() : HookUtil.dp(root.getResources(), 24);
+        int height = HookUtil.scaledSystemDimensionPx(
+                root.getResources(), "status_bar_height", config.statusBarHeightPercent(), fallback);
+        int topPad = config.statusBarTopPaddingPx();
+        int startPad = config.statusBarPaddingStartPx();
+        int endPad = config.statusBarPaddingEndPx();
         int yOffset = HookUtil.dp(root.getResources(), config.statusBarYOffsetDp());
 
         ViewGroup.LayoutParams rootLp = root.getLayoutParams();
@@ -112,7 +125,15 @@ public final class StatusBarHooks {
         }) {
             View child = HookUtil.findByName(root, id);
             if (child == null) continue;
-            child.setPadding(child.getPaddingLeft(), topPad, child.getPaddingRight(), 0);
+
+            if ("status_bar_contents".equals(id)) {
+                int start = startPad < 0 ? child.getPaddingStart() : startPad;
+                int end = endPad < 0 ? child.getPaddingEnd() : endPad;
+                child.setPaddingRelative(start, topPad, end, 0);
+            } else {
+                child.setPadding(child.getPaddingLeft(), topPad, child.getPaddingRight(), 0);
+            }
+
             ViewGroup.LayoutParams lp = child.getLayoutParams();
             if (lp instanceof FrameLayout.LayoutParams flp) {
                 flp.gravity = (flp.gravity & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP;

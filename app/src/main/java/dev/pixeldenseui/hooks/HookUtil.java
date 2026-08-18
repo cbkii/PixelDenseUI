@@ -128,6 +128,16 @@ public final class HookUtil {
         return Math.round(dp * res.getDisplayMetrics().density);
     }
 
+    /** Resolve an Android dimen without calling getDimensionPixelSize(), then scale it. */
+    public static int scaledSystemDimensionPx(Resources res, String name, int percent, int fallbackPx) {
+        int original = Math.max(1, fallbackPx);
+        try {
+            int id = res.getIdentifier(name, "dimen", "android");
+            if (id != 0) original = Math.max(1, Math.round(res.getDimension(id)));
+        } catch (Throwable ignored) {}
+        return Math.max(1, Math.round(original * percent / 100f));
+    }
+
     public static String resourceEntryName(Resources res, int id) {
         try { return res.getResourceEntryName(id); } catch (Throwable ignored) { return ""; }
     }
