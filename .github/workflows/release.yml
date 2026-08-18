@@ -26,12 +26,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
-    env:
-      INPUT_TAG: ${{ inputs.tag }}
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
     steps:
       - name: Require default branch
         shell: bash
@@ -52,6 +46,11 @@ jobs:
           fetch-tags: true
 
       - name: Require signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         shell: bash
         run: |
           set +e
@@ -71,6 +70,7 @@ jobs:
       - name: Resolve version and update source metadata
         id: version
         env:
+          INPUT_TAG: ${{ inputs.tag }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
@@ -186,6 +186,11 @@ jobs:
           gradle-version: '9.3.1'
 
       - name: Prepare release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         shell: bash
         run: |
           set +e
