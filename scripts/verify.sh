@@ -34,6 +34,15 @@ require_file() {
     fi
 }
 
+require_absent() {
+    local rel=${1:-}
+    if [[ -n $rel && ! -e "$ROOT_DIR/$rel" ]]; then
+        pass
+    else
+        fail "File must not be committed/present: ${rel:-<empty path>}"
+    fi
+}
+
 require_exact_line() {
     local file=${1:-}
     local expected=${2:-}
@@ -44,13 +53,26 @@ require_exact_line() {
     fi
 }
 
+require_text() {
+    local file=${1:-}
+    local expected=${2:-}
+    if grep -Fq -- "$expected" "$file" 2>/dev/null; then
+        pass
+    else
+        fail "Expected text '$expected' not found in ${file#$ROOT_DIR/}"
+    fi
+}
+
 main() {
     local rel
     local java_count
 
     for rel in \
         app/src/main/java/dev/pixeldenseui/ModuleMain.java \
+        app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java \
+        app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java \
         app/src/main/java/dev/pixeldenseui/hooks/FrameworkStatusBarHooks.java \
+        app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java \
         app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java \
@@ -58,6 +80,8 @@ main() {
         app/src/main/resources/META-INF/xposed/java_init.list \
         app/src/main/resources/META-INF/xposed/module.prop \
         app/src/main/resources/META-INF/xposed/scope.list \
+        .github/workflows/build.yml \
+        .github/workflows/release.yml \
         LICENSE \
         docs/UPSTREAM.md \
         docs/APK_EVIDENCE.md \
@@ -71,14 +95,30 @@ main() {
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'minApiVersion=101'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'targetApiVersion=101'
 
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'workflow_dispatch:'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'apksigner verify --verbose'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
+
+    require_absent 'ReleaseKey.jks'
+    require_absent 'keystore.properties'
+    require_absent 'SNAPSHOT_MANIFEST.sha256'
+
     if grep -R --line-number --fixed-strings 'NO_CUTOUT' "$ROOT_DIR/app/src/main/java" >/dev/null 2>&1; then
         fail 'Java source unexpectedly contains the aggressive cutout-removal path.'
     else
         pass
     fi
 
+    if grep -R --line-number -E '(SIGNING_KEY|KEY_STORE_PASSWORD|KEY_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' \
+        "$ROOT_DIR" --exclude-dir=.git --exclude='verify.sh' >/dev/null 2>&1; then
+        fail 'Potential hard-coded signing secret detected.'
+    else
+        pass
+    fi
+
     java_count=$(find "$ROOT_DIR/app/src/main/java" -type f -name '*.java' -print | wc -l)
-    if [[ $java_count =~ ^[0-9]+$ ]] && ((java_count >= 10)); then
+    if [[ $java_count =~ ^[0-9]+$ ]] && ((java_count >= 11)); then
         pass
     else
         fail "Unexpected Java source count: $java_count"
@@ -96,6 +136,7 @@ main() {
     printf 'SCOPES:       android, SystemUI, Pixel Launcher\n'
     printf 'LIBXPOSED:    API 101\n'
     printf 'CUTOUT MODE:  retain + clamp (no removal)\n'
+    printf 'RELEASE:      workflow_dispatch + signed APK\n'
     printf '==================================================\n'
 
     ((errors == 0))
