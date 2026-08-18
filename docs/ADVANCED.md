@@ -1,132 +1,66 @@
 # ⚙️ Advanced use & troubleshooting
 
-This document is for users who want to understand Pixel Dense UI's runtime behaviour, OTA sensitivity and recovery boundaries. For installation and normal configuration, start with the [README](../README.md).
-
 ## Runtime scope
 
-Pixel Dense UI is a single libxposed module with three static scopes:
+Pixel Dense UI is a modern libxposed API-101 module with four declared scopes:
 
-- `android` — framework/system-server status-bar height and cutout handling;
-- `com.android.systemui` — status bar, Quick Settings, notifications, lockscreen and screenshot-process hooks;
-- `com.google.android.apps.nexuslauncher` — native Pixel Launcher taskbar support.
+- `system` — system_server on current libxposed/Vector; owns framework `SystemBarUtils` height and optional cutout clamp hooks;
+- `android` — Android framework-package compatibility scope;
+- `com.android.systemui` — status bar, QS, notifications, lockscreen and screenshot child;
+- `com.google.android.apps.nexuslauncher` — Pixel Launcher taskbar.
 
-The module intentionally keeps each major feature family behind its own installation/failure boundary. A missing private class should disable that path rather than widening the hook target or preventing unrelated features from loading.
+v0.1.2 and earlier incorrectly treated `android` as sufficient for system_server under Vector. Existing manager configuration may therefore need the new `system` row after an APK update. The settings app compares `XposedService.getScope()` with the declared requirements and can call `requestScope()` for missing entries.
 
-## Top-edge status bar and camera cutout
+Remote-preference **service failure** is fail-closed in injected host processes: the hook pack is skipped rather than applying built-in geometry defaults. Missing individual preference keys still use deterministic defaults.
 
-The status-bar implementation is designed to move content toward the **physical top edge**, including the usable strip above/alongside the centre punch-hole, without pretending the camera cutout does not exist.
+## Top-edge status bar
 
-The module:
+The framework path scales `SystemBarUtils.getStatusBarHeight*()` while the SystemUI path applies the matching PhoneStatusBarView height. The physical cutout remains represented; PixelDenseUI never substitutes `NO_CUTOUT`.
 
-1. scales the stock result from `SystemBarUtils.getStatusBarHeight*()` using the configured percentage;
-2. applies matching SystemUI status-bar height handling;
-3. optionally clamps the **top** `DisplayCutout` safe inset/bound to the compact bar height;
-4. applies the configured raw pixel start/end/top padding and small vertical offset to status-bar content.
+The cutout safe-inset clamp is now opt-in until the newly reachable system_server path is physically proven. Validate framework/SystemUI height agreement with the clamp off before enabling it.
 
-It deliberately does **not** substitute `DisplayCutout.NO_CUTOUT`, spoof the display resolution, or force icons through the physical camera region.
+### Semantic icon alignment
 
-See [STATUS_BAR_INSET_POLICY.md](STATUS_BAR_INSET_POLICY.md) for the detailed policy.
+AOSP's Android 16 `StatusIconContainer` and `NotificationIconContainer` explicitly centre their children inside `onLayout()`. Ancestor `Gravity.TOP` therefore cannot by itself align VPN/mute or notification icons to a compact top-edge bar.
+
+PixelDenseUI now hooks only those semantic icon-container layout methods after stock layout/state calculation, moves their child view boxes to the top while preserving horizontal/translation state, and compensates the internal centred `StatusBarIconView` drawing pivot for those marked children. The previous recursive descendant gravity rewrite is removed.
+
+## Network traffic overlay
+
+Traffic is not inserted into the clock/notification start-side hierarchy. A tiny non-interactive view is added directly to the PhoneStatusBarView FrameLayout and positioned from the visible cellular/mobile anchor. It therefore consumes no status-bar layout width.
+
+TrafficStats/connectivity sampling and string calculation run on a dedicated daemon scheduler. Only text/visibility changes are posted to the main SystemUI looper. The overlay uses an approximately 50% black rounded background, green download arrow and red upload arrow.
 
 ## Quick Settings
 
-Android 16 Pixel SystemUI uses the newer Compose Quick Settings stack. Pixel Dense UI therefore targets the current repository/grid model rather than relying on older `QSPanel`/`TileLayout` assumptions.
-
-Portrait and landscape values are independent. A landscape row value of `0` means **leave the platform value unchanged**. The module uses narrowly scoped resource/repository interception with optional class lookup so renamed OTA targets can fail soft.
+Android 16 Compose QS remains implemented with narrowly filtered repository/resource interception. Resource ID -> package/name classification is cached to reduce the residual cost of the process-wide `Resources` hook.
 
 ## Notifications
 
-Notification compaction intentionally focuses on collapsed rows and icon sizing rather than globally replacing every notification minimum height.
+The old renderer has been removed. It previously combined broad notification dimension interception, row/content height-result hooks, reflection/classification and recursive icon traversal from recurring layout/update paths.
 
-The module keeps normal and silent density values separate and treats grouped/low-priority paths conservatively. Expanded, heads-up and unusual layouts should remain closer to stock because aggressively shrinking those paths can clip actions, media, conversations or progress content.
+The replacement has three process-creation modes:
 
-## Lockscreen / UDFPS
+- `Off`: notification hook pack is not installed;
+- `Silent only`: supported silent contracted rows only;
+- `All`: supported normal and silent contracted rows.
 
-The fingerprint-circle and fingerprint-icon options alter the graphics exposed by `DeviceEntryIconView`. They are intended to be **visual only** and do not deliberately disable authentication or the touch region.
+It hooks stable `NotificationContentView` content/update/state methods instead of measurement/layout loops. Stock contracted geometry is captured once, a real target layout height/icon size is applied, and original geometry is restorable. Generic `contains("icon")` matching and `scaleX/scaleY` are gone.
 
-Keyguard wallpaper dimming follows the current Pixel scrim model by adjusting the keyguard scrim state and compensating the wallpaper dim composition used by the platform.
+Grouped children, HUN, media, calls, messaging/conversation styles, progress and unknown/custom contracted layouts remain stock. This is conservative by design; each can be added only after current-target mapping and physical validation.
 
-## Screenshot sound
+PixelDenseUI notification dimensions are no longer handled by `SystemUiResourceHooks`, avoiding resource + view double scaling.
 
-Screenshot sound suppression is deliberately isolated to the SystemUI screenshot child process. The implementation includes Android 16 QPR1/QPR2 controller fallbacks plus a process-local `MediaPlayer` fallback.
+## Magisk / RRO boundary
 
-Keeping the broad fallback inside the screenshot child process avoids affecting unrelated SystemUI audio.
+A patched/re-signed privileged `SystemUIGoogle.apk` is intentionally rejected. An optional Magisk-delivered RRO may later be benchmarked for a small set of static global resources only. It cannot express per-row silent classification and will not be added without exact overlayable/idmap mapping plus controlled performance evidence. See [RRO_EVALUATION.md](RRO_EVALUATION.md).
 
-## Reliability model
+## Runtime diagnostics
 
-Pixel Dense UI borrows several failure-boundary ideas from PixelXpert and applies them to a much smaller codebase:
+The app records current-build reachability markers for system_server, main SystemUI, screenshot and Launcher in the module's remote preferences. These markers are diagnostic only and cannot make a host-process hook fatal. Build source identity is exposed through `BuildConfig.SOURCE_REVISION`.
 
-- hook registration inspects only methods **declared by the intended class**;
-- optional/private classes are looked up fail-soft;
-- feature packs install independently;
-- remote-preference reads have deterministic defaults;
-- rapid-restart protection is process-qualified, so a short-lived screenshot child process cannot accumulate strikes against main SystemUI;
-- dynamically inserted views receive parent-compatible layout params;
-- framework/cutout hooks keep local exception boundaries;
-- unrecognised OTA targets should remain stock rather than being replaced by a guessed hook.
+Hook installation logs are sent both through the Xposed module logger and Android logcat (`PixelDenseUI`) to make “module loaded” versus “feature hook installed/skipped” distinguishable during field testing.
 
-Detailed provenance: [UPSTREAM.md](UPSTREAM.md).
+## OTA / recovery model
 
-## OTA behaviour
-
-Google can rename or restructure private SystemUI classes between monthly updates and QPRs. After an OTA:
-
-1. boot once with your known-good Pixel Dense UI configuration;
-2. verify main SystemUI stability before changing settings;
-3. verify lockscreen/UDFPS, screenshot capture, status bar, QS, notifications, then Pixel Launcher/taskbar;
-4. if one feature fails, disable only the relevant setting first;
-5. if SystemUI repeatedly crashes, disable the module in your Xposed/libxposed manager and reboot before collecting diagnostics.
-
-A feature that silently returns to stock after an OTA may indicate that an optional target was not found. That is preferable to broad hooking or a crash loop.
-
-## Deterministic validation order
-
-Use the maintained [VALIDATION.md](VALIDATION.md) checklist. The recommended order is:
-
-1. boot and main-SystemUI stability;
-2. screenshot child-process stability and muted capture;
-3. status-bar height/padding/cutout alignment;
-4. clock position and seconds;
-5. QS portrait/landscape density and grid;
-6. fingerprint visuals while confirming unlock still works;
-7. keyguard dim;
-8. notifications;
-9. taskbar / Recents.
-
-## Troubleshooting
-
-### SystemUI crash / repeated restart
-
-- Disable Pixel Dense UI in the framework manager.
-- Reboot.
-- Confirm stock SystemUI is stable.
-- Re-enable Pixel Dense UI and test one feature family at a time.
-- Avoid enabling overlapping PixelXpert/Iconify hooks while isolating a failure.
-
-### Settings app says the Xposed service is disconnected
-
-Confirm the module is enabled in an API-101-capable framework and the expected scopes are enabled, then reopen the settings app.
-
-### A setting appears to do nothing
-
-Some hooks are installed at process creation. Recreate the affected process or use a full reboot as the clean validation boundary. If the behaviour remains stock after an OTA, the optional target may have drifted.
-
-### Reporting a reproducible issue
-
-Include:
-
-- Pixel model and codename;
-- Android build number and security patch level;
-- Pixel Dense UI version;
-- Xposed/libxposed runtime and API level;
-- exact Pixel Dense UI settings involved;
-- whether overlapping modules were disabled;
-- relevant SystemUI / framework / launcher logs;
-- clear reproduction steps and whether the issue survives a reboot.
-
-## Deeper technical references
-
-- [DEVICE_HOOK_MAP.md](DEVICE_HOOK_MAP.md) — target classes/resources from the reference Pixel build.
-- [APK_EVIDENCE.md](APK_EVIDENCE.md) — source APK evidence used to map the initial implementation.
-- [STATUS_BAR_INSET_POLICY.md](STATUS_BAR_INSET_POLICY.md) — camera-hole/top-edge geometry policy.
-- [BUILD_STATUS.md](BUILD_STATUS.md) — current CI/build verification boundary.
-- [UPSTREAM.md](UPSTREAM.md) — feature-level upstream provenance.
+Private classes remain fail-soft and major hook families install independently. After an OTA, inspect state before changing configuration. If SystemUI loops, disable PixelDenseUI in the framework manager and reboot. Once stock is stable, re-enable and validate the layers in [VALIDATION.md](VALIDATION.md) one at a time.

@@ -1,40 +1,45 @@
 # Roadmap
 
-This roadmap tracks intentionally deferred work. Items here are not treated as implemented until the target classes/slots are verified on the current Android 16 SystemUI build and CI/runtime validation exists.
+This roadmap tracks intentionally deferred work. Items are not treated as implemented until current Android 16 targets and physical validation support them.
 
 ## P1 — Status-bar ignored icons
 
 **Status:** planned; not implemented.
 
-The analogous current PixelXpert `StatusIconTuner` locates `IconManager` containers by parent resource IDs and then directly rewrites the private `mIgnoredSlots` list. That approach is reported unreliable on this target, so Pixel Dense UI will not copy it blindly.
+The analogous PixelXpert path mutates private ignored-slot lists. Pixel Dense UI will not copy that blindly. The target Android 16 slot/controller pipeline must first be enumerated, with status-bar, QS and keyguard surfaces handled separately and critical security/privacy/emergency indicators preserved by default.
 
-### Required implementation approach
+Acceptance requires reversible slot filtering, no unrelated icon loss/duplication after restart/configuration changes, and fail-soft behaviour after OTA drift.
 
-1. Capture the Android 16 status-icon slot model/controller path on the target SystemUI build.
-2. Enumerate actual slot names and ownership before exposing selectable values.
-3. Prefer filtering configured slots **before icon-view materialisation** rather than hiding arbitrary child views after layout.
-4. Keep status-bar, Quick Settings and keyguard icon surfaces separately addressable; do not assume one container/list controls all three.
-5. Preserve privacy, emergency, security and other critical indicators by default. Any ability to hide those must be explicit and separately validated.
-6. Make filtering reversible at runtime and resilient to reinflation, rotation, density/configuration changes, user switch and SystemUI restart.
-7. Fail soft when an OTA changes the controller/model/slot mapping: unrecognised targets remain visible rather than causing SystemUI failure.
-8. Add target-build evidence and regression tests before promoting the feature from roadmap to supported.
+## P1 — Physical validation of corrected system-server/status-bar geometry
 
-### Acceptance criteria
+**Status:** implementation landed on the validation branch; device validation required.
 
-- configured ordinary slots remain hidden across portrait/landscape and QS/keyguard transitions;
-- clearing a slot restores it without reboot where the host pipeline supports live refresh;
-- no duplicate/missing unrelated icons after SystemUI restart;
-- no mutation of unrelated container state;
-- no main-SystemUI crash if the expected slot pipeline is absent.
+The modern libxposed scope now explicitly includes `system`, which is required for `onSystemServerStarting()` under Vector. The SystemUI path also replaces recursive descendant gravity rewriting with targeted status/notification-icon container alignment and moves network traffic into a non-layout cellular overlay.
+
+Validate framework/SystemUI height agreement first with cutout clamp disabled, then test the clamp independently.
+
+## P1 — Low-overhead notification renderer
+
+**Status:** implementation landed on the validation branch; controlled performance validation required.
+
+The old process-wide notification resource scaling, notification height hooks, recurring row-layout callbacks and recursive icon traversal are removed. The replacement supports `Off / Silent only / All` and applies only to conservative contracted-content cases at stable update/content lifecycle points.
+
+Promotion requires no material shade-jank regression versus mode Off and correct normal/silent/group/special-layout behaviour.
 
 ## P2 — Runtime target diagnostics
 
-Add a read-only diagnostics page that reports which optional hook targets were found at runtime (Compose QS repositories, `DeviceEntryIconView`, scrim classes, screenshot QPR1/QPR2 controllers, launcher taskbar targets). This should make OTA drift visible without relying only on logcat.
+**Status:** first stage implemented.
+
+The settings screen now reports source/build identity, actual framework scope and whether the current build has reached system_server, main SystemUI, screenshot child and Pixel Launcher. A later stage may report each optional private class/method target individually.
+
+## P2 — Optional Magisk/RRO benchmark
+
+A patched/re-signed `SystemUIGoogle.apk` is rejected as a production design. An RRO may be prototyped only for small static/global resource values after exact `<overlayable>` eligibility is mapped and a controlled benchmark demonstrates a material advantage. RRO cannot implement per-row silent-only behaviour. See `RRO_EVALUATION.md`.
 
 ## P2 — Preference migration/versioning
 
-Before a stable public release, add an explicit preference-schema version so renamed controls such as fixed-dp status-bar height can be migrated or discarded deterministically instead of leaving stale keys.
+Before a stable public release, add a preference-schema version for renamed/removed settings. Scope migration is handled through the libxposed service's scope request API; preference migration remains separate.
 
 ## P3 — Per-orientation status-bar profiles
 
-Consider independent portrait/landscape status-bar height and pixel-padding values only after the single-profile percentage model is physically validated. Do not add orientation complexity before the current top-edge/cutout policy is proven stable.
+Consider independent portrait/landscape status-bar height and pixel-padding values only after the corrected single-profile system-server/top-edge policy is physically proven.

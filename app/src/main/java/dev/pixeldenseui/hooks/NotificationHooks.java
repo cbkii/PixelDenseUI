@@ -3,22 +3,39 @@
  */
 package dev.pixeldenseui.hooks;
 
+import android.app.Notification;
+import android.os.Bundle;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
 
+import java.util.Locale;
+import java.util.WeakHashMap;
+
 import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
+/**
+ * Low-overhead collapsed-notification compaction.
+ *
+ * The old implementation combined process-wide notification resource interception,
+ * height-getter hooks and recursive descendant walking from onLayout/updateLimits.
+ * This implementation touches only the contracted child at stable lifecycle points
+ * and remembers stock geometry so a row can be restored when its mode/state changes.
+ */
 public final class NotificationHooks {
-    // Android 16 SystemUI currently keeps BUCKET_SILENT at 6. We prefer resolving
-    // the runtime constant/classification first and only use 6 as a final fallback.
     private static final int FALLBACK_BUCKET_SILENT = 6;
+    private static final String CONTENT_VIEW =
+            "com.android.systemui.statusbar.notification.row.NotificationContentView";
 
     private final XposedModule module;
     private final ClassLoader cl;
     private final ModuleConfig config;
     private final int silentBucket;
+
+    private final WeakHashMap<View, ContractedState> contractedStates = new WeakHashMap<>();
+    private final WeakHashMap<View, Boolean> pendingFirstLayout = new WeakHashMap<>();
+    private final WeakHashMap<Object, Boolean> silentCache = new WeakHashMap<>();
 
     public NotificationHooks(XposedModule module, ClassLoader cl, ModuleConfig config) {
         this.module = module;
@@ -28,91 +45,227 @@ public final class NotificationHooks {
     }
 
     public void install() {
-        Class<?> row = HookUtil.findClass(cl,
-                "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow");
-        if (row == null) return;
+        if (config.notificationMode() == ModuleConfig.NOTIFICATION_MODE_OFF) {
+            HookUtil.log(module, "notification hooks not installed: mode Off");
+            return;
+        }
 
-        // Row-level final bounds.
-        hookScaledIntResult(row, "getCollapsedHeight", false);
-        hookScaledIntResult(row, "getMinHeight", false);
+        Class<?> content = HookUtil.findClass(cl, CONTENT_VIEW);
+        if (content == null) {
+            HookUtil.logWarning(module, "notification hooks unavailable: NotificationContentView missing");
+            return;
+        }
 
-        // Contracted-content minimums. This exact class/method family exists in the
-        // supplied Pixel 9a SystemUI APK and gives us density without touching expanded
-        // or heads-up view heights.
-        Class<?> content = HookUtil.findClass(cl,
-                "com.android.systemui.statusbar.notification.row.NotificationContentView");
-        hookScaledIntResult(content, "getMinContentHeightHint", true);
-        hookScaledIntResult(content, "getMinHeight", true);
+        HookUtil.hookAll(module, content, "setContractedChild", chain -> {
+            Object result = chain.proceed();
+            View child = chain.getArg(0) instanceof View v ? v : contractedChild(chain.getThisObject());
+            applyContracted(chain.getThisObject(), child);
+            return result;
+        });
 
-        for (String method : new String[]{"onLayout", "updateLimits"}) {
-            HookUtil.hookAll(module, row, method, chain -> {
+        HookUtil.hookAll(module, content, "onNotificationUpdated", chain -> {
+            Object result = chain.proceed();
+            Object row = containingRow(chain.getThisObject());
+            if (row != null) silentCache.remove(row);
+            applyContracted(chain.getThisObject(), contractedChild(chain.getThisObject()));
+            return result;
+        });
+
+        // Group-membership and heads-up transitions can change whether a contracted row is
+        // eligible. These are state changes, not frame/layout hot paths.
+        for (String method : new String[]{"setIsChildInGroup", "setHeadsUp"}) {
+            HookUtil.hookAll(module, content, method, chain -> {
                 Object result = chain.proceed();
-                if (chain.getThisObject() instanceof View v) {
-                    compactIcons(v, isSilent(chain.getThisObject()));
-                }
+                applyContracted(chain.getThisObject(), contractedChild(chain.getThisObject()));
                 return result;
             });
         }
 
-        HookUtil.log(module, "notification density hooks installed; silent bucket=" + silentBucket);
+        HookUtil.log(module, "notification hooks installed: mode=" + modeName(config.notificationMode())
+                + "; stable contracted-content lifecycle; silent bucket=" + silentBucket);
     }
 
-    private void hookScaledIntResult(Class<?> cls, String methodName, boolean findOwningRow) {
-        if (cls == null) return;
-        HookUtil.hookAll(module, cls, methodName, chain -> {
-            Object result = chain.proceed();
-            if (!(result instanceof Integer original)) return result;
+    private void applyContracted(Object content, View child) {
+        if (child == null) return;
 
-            Object row = findOwningRow && chain.getThisObject() instanceof View v
-                    ? findOwningRow(v) : chain.getThisObject();
-            boolean silent = isSilent(row);
-            int pct = silent ? config.silentNotificationDensityPercent()
-                    : config.notificationDensityPercent();
+        int mode = config.notificationMode();
+        Object row = containingRow(content);
+        boolean silent = row != null && isSilent(row);
+        boolean eligible = mode != ModuleConfig.NOTIFICATION_MODE_OFF
+                && row != null
+                && !(mode == ModuleConfig.NOTIFICATION_MODE_SILENT_ONLY && !silent)
+                && !isGroupedChild(content, row)
+                && !isHeadsUp(row)
+                && !isSpecialLayout(row);
 
-            // Resource-level padding reductions do most of the compaction. These floors
-            // are intentionally conservative enough to keep contracted content usable.
-            int floor = HookUtil.dp(silent ? 32 : 40);
-            return Math.max(floor, Math.round(original * pct / 100f));
+        if (!eligible) {
+            restore(child);
+            return;
+        }
+
+        int densityPercent = silent
+                ? config.silentNotificationDensityPercent()
+                : config.notificationDensityPercent();
+        int iconPercent = silent
+                ? config.silentNotificationIconPercent()
+                : config.notificationIconPercent();
+        int floorDp = silent ? 36 : 44;
+
+        if (child.getHeight() > 0) {
+            applyGeometry(child, densityPercent, iconPercent, floorDp);
+            return;
+        }
+
+        if (pendingFirstLayout.containsKey(child)) return;
+        pendingFirstLayout.put(child, Boolean.TRUE);
+        child.post(() -> {
+            pendingFirstLayout.remove(child);
+            if (child.getHeight() > 0) {
+                applyContracted(content, child);
+            }
         });
     }
 
-    private View findOwningRow(View child) {
-        View cursor = child;
-        for (int i = 0; i < 10 && cursor != null; i++) {
-            if (cursor.getClass().getName().equals(
-                    "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow")) {
-                return cursor;
-            }
-            if (!(cursor.getParent() instanceof View parent)) return null;
-            cursor = parent;
+    private void applyGeometry(View child, int densityPercent, int iconPercent, int floorDp) {
+        ContractedState state = contractedStates.get(child);
+        if (state == null) {
+            state = ContractedState.capture(child);
+            contractedStates.put(child, state);
         }
-        return null;
+
+        int naturalHeight = state.naturalHeight > 0 ? state.naturalHeight : child.getHeight();
+        int floorPx = HookUtil.dp(child.getResources(), floorDp);
+        int targetHeight = Math.max(floorPx, Math.round(naturalHeight * densityPercent / 100f));
+
+        ViewGroup.LayoutParams lp = child.getLayoutParams();
+        if (lp != null && lp.height != targetHeight) {
+            lp.height = targetHeight;
+            child.setLayoutParams(lp);
+        }
+
+        int top = Math.round(state.paddingTop * densityPercent / 100f);
+        int bottom = Math.round(state.paddingBottom * densityPercent / 100f);
+        if (child.getPaddingTop() != top || child.getPaddingBottom() != bottom) {
+            child.setPadding(state.paddingLeft, top, state.paddingRight, bottom);
+        }
+
+        int scaledMinHeight = Math.min(targetHeight,
+                Math.round(state.minimumHeight * densityPercent / 100f));
+        child.setMinimumHeight(Math.max(0, scaledMinHeight));
+
+        ImageView icon = exactContractedIcon(child);
+        if (icon != null) {
+            if (state.icon == null || state.icon.view != icon) {
+                if (state.icon != null) state.icon.restore();
+                state.icon = IconState.capture(icon);
+            }
+            state.icon.apply(iconPercent);
+        } else if (state.icon != null) {
+            state.icon.restore();
+            state.icon = null;
+        }
+
+        child.requestLayout();
+    }
+
+    private void restore(View child) {
+        ContractedState state = contractedStates.remove(child);
+        if (state == null) return;
+        state.restore(child);
+        child.requestLayout();
+    }
+
+    private View contractedChild(Object content) {
+        Object child = HookUtil.callNoArgs(content, "getContractedChild");
+        if (!(child instanceof View)) child = HookUtil.getField(content, "mContractedChild");
+        return child instanceof View v ? v : null;
+    }
+
+    private Object containingRow(Object content) {
+        return HookUtil.getField(content, "mContainingNotification");
+    }
+
+    private boolean isGroupedChild(Object content, Object row) {
+        Object value = HookUtil.getField(content, "mIsChildInGroup");
+        if (Boolean.TRUE.equals(value)) return true;
+        value = HookUtil.callNoArgs(row, "isChildInGroup");
+        return Boolean.TRUE.equals(value);
+    }
+
+    private boolean isHeadsUp(Object row) {
+        Object value = HookUtil.callNoArgs(row, "isHeadsUp");
+        return Boolean.TRUE.equals(value);
+    }
+
+    private boolean isSpecialLayout(Object row) {
+        try {
+            Object entry = notificationEntry(row);
+            Object sbn = HookUtil.callNoArgs(entry, "getSbn");
+            Object n = HookUtil.callNoArgs(sbn, "getNotification");
+            if (!(n instanceof Notification notification)) return true;
+
+            if (Notification.CATEGORY_CALL.equals(notification.category)
+                    || Notification.CATEGORY_TRANSPORT.equals(notification.category)) {
+                return true;
+            }
+
+            Bundle extras = notification.extras;
+            String template = extras == null ? null : extras.getString(Notification.EXTRA_TEMPLATE);
+            if (template != null) {
+                String lower = template.toLowerCase(Locale.ROOT);
+                if (lower.contains("mediastyle")
+                        || lower.contains("callstyle")
+                        || lower.contains("messagingstyle")
+                        || lower.contains("decoratedcustomviewstyle")) {
+                    return true;
+                }
+            }
+
+            if (extras != null && extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0) {
+                return true;
+            }
+
+            return template == null && notification.contentView != null;
+        } catch (Throwable ignored) {
+            return true;
+        }
     }
 
     private boolean isSilent(Object row) {
-        if (row == null) return false;
-        try {
-            Object entry = HookUtil.callNoArgs(row, "getEntry");
-            if (entry == null) entry = HookUtil.getField(row, "mEntry");
-            if (entry == null) entry = HookUtil.getField(row, "entry");
+        Boolean cached = silentCache.get(row);
+        if (cached != null) return cached;
 
-            // Newer Android builds can explicitly flag silent notifications. Prefer it
-            // when present, but do not require it because ordinary low-priority entries
-            // can still be placed in the silent section by SystemUI ranking.
+        boolean result = false;
+        try {
+            Object entry = notificationEntry(row);
             Object sbn = HookUtil.callNoArgs(entry, "getSbn");
             Object notification = HookUtil.callNoArgs(sbn, "getNotification");
             Object explicitSilent = HookUtil.callNoArgs(notification, "isSilent");
-            if (Boolean.TRUE.equals(explicitSilent)) return true;
-
-            Object bucket = HookUtil.callNoArgs(entry, "getBucket");
-            if (bucket instanceof Integer i && i == silentBucket) return true;
-
-            Object children = HookUtil.getField(row, "mChildrenContainer");
-            Object lowPriority = HookUtil.callNoArgs(children, "showingAsLowPriority");
-            return Boolean.TRUE.equals(lowPriority);
+            if (Boolean.TRUE.equals(explicitSilent)) {
+                result = true;
+            } else {
+                Object bucket = HookUtil.callNoArgs(entry, "getBucket");
+                if (bucket instanceof Integer i && i == silentBucket) {
+                    result = true;
+                } else {
+                    Object children = HookUtil.getField(row, "mChildrenContainer");
+                    Object lowPriority = HookUtil.callNoArgs(children, "showingAsLowPriority");
+                    result = Boolean.TRUE.equals(lowPriority);
+                }
+            }
         } catch (Throwable ignored) {
-            return false;
+            result = false;
         }
+
+        silentCache.put(row, result);
+        return result;
+    }
+
+    private Object notificationEntry(Object row) {
+        Object entry = HookUtil.callNoArgs(row, "getEntry");
+        if (entry == null) entry = HookUtil.getField(row, "mEntry");
+        if (entry == null) entry = HookUtil.getField(row, "entry");
+        return entry;
     }
 
     private int resolveSilentBucket() {
@@ -127,34 +280,124 @@ public final class NotificationHooks {
         return FALLBACK_BUCKET_SILENT;
     }
 
-    private void compactIcons(View root, boolean silent) {
-        float scale = (silent ? config.silentNotificationIconPercent()
-                : config.notificationIconPercent()) / 100f;
-        scaleIconsRecursive(root, scale, 0);
-    }
+    private ImageView exactContractedIcon(View child) {
+        View candidate = child.findViewById(android.R.id.icon);
+        if (candidate instanceof ImageView image) return image;
 
-    private void scaleIconsRecursive(View view, float scale, int depth) {
-        if (depth > 6) return;
-        if (view instanceof ImageView iv) {
-            String name = "";
-            try {
-                if (iv.getId() != View.NO_ID) {
-                    name = iv.getResources().getResourceEntryName(iv.getId());
-                }
-            } catch (Throwable ignored) {}
-            int max = HookUtil.dp(iv.getResources(), 56);
-            // Be deliberately conservative: only scale views that SystemUI names as
-            // icons. Id-less ImageViews may be actions, progress affordances or custom
-            // RemoteViews content and must remain untouched.
-            if (iv.getHeight() <= max && name.toLowerCase().contains("icon")) {
-                iv.setScaleX(scale);
-                iv.setScaleY(scale);
+        String[] packages = new String[]{
+                "android",
+                "com.android.systemui",
+                child.getContext().getPackageName()
+        };
+        String[] names = new String[]{"icon", "small_icon", "notification_icon"};
+        for (String pkg : packages) {
+            for (String name : names) {
+                try {
+                    int id = child.getResources().getIdentifier(name, "id", pkg);
+                    if (id == 0) continue;
+                    candidate = child.findViewById(id);
+                    if (candidate instanceof ImageView image) return image;
+                } catch (Throwable ignored) {}
             }
         }
-        if (view instanceof ViewGroup group) {
-            for (int i = 0; i < group.getChildCount(); i++) {
-                scaleIconsRecursive(group.getChildAt(i), scale, depth + 1);
+        return null;
+    }
+
+    private static String modeName(int mode) {
+        return switch (mode) {
+            case ModuleConfig.NOTIFICATION_MODE_SILENT_ONLY -> "silent-only";
+            case ModuleConfig.NOTIFICATION_MODE_ALL -> "all";
+            default -> "off";
+        };
+    }
+
+    private static final class ContractedState {
+        final int paddingLeft;
+        final int paddingTop;
+        final int paddingRight;
+        final int paddingBottom;
+        final int minimumHeight;
+        final int layoutWidth;
+        final int layoutHeight;
+        final int naturalHeight;
+        IconState icon;
+
+        private ContractedState(View child) {
+            paddingLeft = child.getPaddingLeft();
+            paddingTop = child.getPaddingTop();
+            paddingRight = child.getPaddingRight();
+            paddingBottom = child.getPaddingBottom();
+            minimumHeight = child.getMinimumHeight();
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            layoutWidth = lp == null ? ViewGroup.LayoutParams.WRAP_CONTENT : lp.width;
+            layoutHeight = lp == null ? ViewGroup.LayoutParams.WRAP_CONTENT : lp.height;
+            naturalHeight = child.getHeight();
+        }
+
+        static ContractedState capture(View child) {
+            return new ContractedState(child);
+        }
+
+        void restore(View child) {
+            child.setPadding(paddingLeft, paddingTop, paddingRight, paddingBottom);
+            child.setMinimumHeight(minimumHeight);
+            ViewGroup.LayoutParams lp = child.getLayoutParams();
+            if (lp != null) {
+                lp.width = layoutWidth;
+                lp.height = layoutHeight;
+                child.setLayoutParams(lp);
             }
+            if (icon != null) icon.restore();
+        }
+    }
+
+    private static final class IconState {
+        final ImageView view;
+        final int layoutWidth;
+        final int layoutHeight;
+        final int naturalWidth;
+        final int naturalHeight;
+        final int minimumWidth;
+        final int minimumHeight;
+
+        private IconState(ImageView view) {
+            this.view = view;
+            ViewGroup.LayoutParams lp = view.getLayoutParams();
+            layoutWidth = lp == null ? ViewGroup.LayoutParams.WRAP_CONTENT : lp.width;
+            layoutHeight = lp == null ? ViewGroup.LayoutParams.WRAP_CONTENT : lp.height;
+            naturalWidth = view.getWidth();
+            naturalHeight = view.getHeight();
+            minimumWidth = view.getMinimumWidth();
+            minimumHeight = view.getMinimumHeight();
+        }
+
+        static IconState capture(ImageView view) {
+            return new IconState(view);
+        }
+
+        void apply(int percent) {
+            ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp == null) return;
+            int floor = HookUtil.dp(view.getResources(), 12);
+            int baseWidth = naturalWidth > 0 ? naturalWidth : minimumWidth;
+            int baseHeight = naturalHeight > 0 ? naturalHeight : minimumHeight;
+            if (baseWidth <= 0 || baseHeight <= 0) return;
+            lp.width = Math.max(floor, Math.round(baseWidth * percent / 100f));
+            lp.height = Math.max(floor, Math.round(baseHeight * percent / 100f));
+            view.setLayoutParams(lp);
+            view.setMinimumWidth(Math.min(lp.width, Math.round(minimumWidth * percent / 100f)));
+            view.setMinimumHeight(Math.min(lp.height, Math.round(minimumHeight * percent / 100f)));
+        }
+
+        void restore() {
+            ViewGroup.LayoutParams lp = view.getLayoutParams();
+            if (lp != null) {
+                lp.width = layoutWidth;
+                lp.height = layoutHeight;
+                view.setLayoutParams(lp);
+            }
+            view.setMinimumWidth(minimumWidth);
+            view.setMinimumHeight(minimumHeight);
         }
     }
 }

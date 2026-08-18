@@ -32,8 +32,16 @@ public final class ModuleMain extends XposedModule {
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
         SharedPreferences prefs = preferencesOrNull();
-        if (BootLoopProtector.shouldSkip(prefs, "android")) {
-            HookUtil.logWarning(this, "bootloop guard: skipping android/system_server hooks for this restart window");
+        if (prefs == null) {
+            HookUtil.logWarning(this,
+                    "remote preferences unavailable; fail-closed: skipping system_server hooks");
+            return;
+        }
+        markRuntime(prefs, "runtime_system_server_version_code", "runtime_system_server_seen_ms");
+
+        if (BootLoopProtector.shouldSkip(prefs, "system")) {
+            HookUtil.logWarning(this,
+                    "bootloop guard: skipping system_server hooks for this restart window");
             return;
         }
 
@@ -53,6 +61,22 @@ public final class ModuleMain extends XposedModule {
         }
 
         SharedPreferences prefs = preferencesOrNull();
+        if (prefs == null) {
+            HookUtil.logWarning(this, "remote preferences unavailable; fail-closed: skipping hooks for "
+                    + packageName + " in " + processName);
+            return;
+        }
+
+        if ("com.android.systemui".equals(packageName)) {
+            if (processName != null && processName.toLowerCase().contains("screenshot")) {
+                markRuntime(prefs, "runtime_screenshot_version_code", "runtime_screenshot_seen_ms");
+            } else {
+                markRuntime(prefs, "runtime_systemui_version_code", "runtime_systemui_seen_ms");
+            }
+        } else {
+            markRuntime(prefs, "runtime_launcher_version_code", "runtime_launcher_seen_ms");
+        }
+
         String guardTarget = guardTarget(packageName, processName);
         if (BootLoopProtector.shouldSkip(prefs, guardTarget)) {
             HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + guardTarget
@@ -83,8 +107,19 @@ public final class ModuleMain extends XposedModule {
         try {
             return getRemotePreferences(ModuleConfig.PREF_FILE);
         } catch (Throwable t) {
-            HookUtil.logWarning(this, "remote preferences unavailable; using built-in defaults: " + t);
+            HookUtil.logWarning(this, "remote preferences unavailable: " + t);
             return null;
+        }
+    }
+
+    private static void markRuntime(SharedPreferences prefs, String versionKey, String timeKey) {
+        try {
+            prefs.edit()
+                    .putInt(versionKey, BuildConfig.VERSION_CODE)
+                    .putLong(timeKey, System.currentTimeMillis())
+                    .apply();
+        } catch (Throwable ignored) {
+            // Diagnostics must never make a host-process hook fatal.
         }
     }
 }

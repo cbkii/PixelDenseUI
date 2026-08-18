@@ -14,6 +14,8 @@ if (hasReleaseSigning) {
 fun releaseProperty(name: String): String =
     releaseProperties.getProperty(name) ?: error("Missing release signing property: $name")
 
+val sourceRevision = (System.getenv("GITHUB_SHA") ?: "local").take(12)
+
 android {
     namespace = "dev.pixeldenseui"
     compileSdk = 36
@@ -24,6 +26,11 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.1.2"
+        buildConfigField("String", "SOURCE_REVISION", "\"$sourceRevision\"")
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     signingConfigs {

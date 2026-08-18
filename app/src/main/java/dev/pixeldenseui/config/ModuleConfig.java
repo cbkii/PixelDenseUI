@@ -8,12 +8,18 @@ import android.content.SharedPreferences;
 /**
  * Immutable read-through view of module preferences.
  *
- * Remote preferences are an external framework capability. Every read therefore
- * has a deterministic default so a transient preference-provider failure does
- * not turn into a SystemUI/system_server crash during module startup.
+ * A connected remote-preference service may legitimately contain no value for a
+ * new key, so each key still has a deterministic default. Host-process startup
+ * itself is fail-closed in ModuleMain when the remote preference service cannot
+ * be obtained at all; a missing service is not treated as an empty preference
+ * file.
  */
 public final class ModuleConfig {
     public static final String PREF_FILE = "settings";
+
+    public static final int NOTIFICATION_MODE_OFF = 0;
+    public static final int NOTIFICATION_MODE_SILENT_ONLY = 1;
+    public static final int NOTIFICATION_MODE_ALL = 2;
 
     private final SharedPreferences prefs;
 
@@ -24,7 +30,9 @@ public final class ModuleConfig {
     public boolean taskbarEnabled() { return getBoolean("taskbar_enabled", true); }
 
     public boolean topEdgeStatusBar() { return getBoolean("top_edge_statusbar", true); }
-    public boolean clampCutoutSafeInset() { return getBoolean("clamp_cutout_safe_inset", true); }
+    // Keep the framework cutout clamp opt-in until the corrected system_server scope
+    // has been physically validated on the target build.
+    public boolean clampCutoutSafeInset() { return getBoolean("clamp_cutout_safe_inset", false); }
     public int statusBarHeightPercent() { return clamp(getInt("statusbar_height_percent", 100), 50, 150); }
     // Raw pixels by design. -1 means preserve the current stock start/end padding.
     public int statusBarPaddingStartPx() { return clamp(getInt("statusbar_padding_start_px", -1), -1, 240); }
@@ -60,6 +68,15 @@ public final class ModuleConfig {
     public boolean hideFingerprintIcon() { return getBoolean("hide_fingerprint_icon", true); }
     public int keyguardWallpaperDimPercent() { return clamp(getInt("keyguard_wallpaper_dim_percent", 66), 0, 100); }
     public boolean disableScreenshotSound() { return getBoolean("disable_screenshot_sound", true); }
+
+    /**
+     * 0 = no notification modifications, 1 = silent rows only, 2 = all supported collapsed rows.
+     * Off is the safe default until the low-overhead renderer has completed physical validation.
+     */
+    public int notificationMode() {
+        return clamp(getInt("notification_mode", NOTIFICATION_MODE_OFF),
+                NOTIFICATION_MODE_OFF, NOTIFICATION_MODE_ALL);
+    }
 
     public int notificationDensityPercent() { return clamp(getInt("notification_density_percent", 72), 55, 100); }
     public int silentNotificationDensityPercent() { return clamp(getInt("silent_notification_density_percent", 55), 42, 100); }
