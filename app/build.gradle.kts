@@ -8,7 +8,7 @@ val releasePropertiesFile = rootProject.file("keystore.properties")
 val releaseProperties = Properties()
 val hasReleaseSigning = releasePropertiesFile.isFile
 if (hasReleaseSigning) {
-    releasePropertiesFile.inputStream().use(releaseProperties::load)
+    releasePropertiesFile.inputStream().use { releaseProperties.load(it) }
 }
 
 fun releaseProperty(name: String): String =
@@ -56,4 +56,5 @@ android {
 dependencies {
     compileOnly("io.github.libxposed:api:101.0.1")
     implementation("io.github.libxposed:service:101.0.0")
+    testImplementation("junit:junit:4.13.2")
 }
