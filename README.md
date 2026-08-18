@@ -60,12 +60,14 @@ gradle :app:assembleDebug
 GitHub Actions CI runs on pushes to `main`, pull requests, and manual dispatch. It performs:
 
 - Bash/source invariant verification;
-- debug unit-test task;
+- debug unit tests, including the declared-method-only hook regression test;
 - Android lint;
-- debug APK assembly;
-- release-variant assembly;
-- tracked-source mutation check;
-- debug APK and lint-report artifact upload.
+- debug and release-variant assembly;
+- an **ephemeral release-signing smoke test** using a CI-only keystore and `apksigner verify`;
+- repository cleanliness verification, including unexpected untracked residue;
+- debug APK, signed release-smoke APK, and lint-report artifact upload.
+
+The CI-only keystore is generated for that run, removed before the cleanliness check, and is unrelated to the real release signing key.
 
 A green CI build is required before treating a revision as installable.
 
@@ -82,7 +84,7 @@ Configure these repository Actions secrets once:
 
 Then open **Actions → Manual Release → Run workflow**, select the default branch, enter the version tag (for example `v0.1.0`), and choose whether it is a pre-release. The workflow builds the release variant, verifies the APK with `apksigner`, creates `SHA256SUMS.txt`, refuses to overwrite an existing release, and publishes both files to a GitHub Release.
 
-Signing material is generated only inside the Actions runner and removed in an `always()` cleanup step. It is ignored by Git.
+Release signing material is materialised only inside the Actions runner from repository secrets and removed in an `always()` cleanup step. It is ignored by Git.
 
 ## Install / activate
 
