@@ -19,6 +19,19 @@ It intentionally does **not** contain lock-screen themes, battery styles, volume
 
 The initial hook map was derived from an Android 16 Pixel SystemUI APK supplied from a Pixel 9a (`tegu`). The APK exposes the current Compose QS classes and classic notification-row classes used by this implementation; see `docs/DEVICE_HOOK_MAP.md` and `docs/APK_EVIDENCE.md`.
 
+## Reliability model
+
+Pixel Dense UI keeps the narrow scope of this project while adopting several battle-tested PixelXpert failure boundaries:
+
+- hook registration only targets methods **declared by the intended class**; it does not silently walk into inherited `View`/framework methods when an OTA removes an override;
+- optional/version-drifted classes simply disable the affected hook path;
+- SystemUI resource, status-bar and notification hook packs install independently so one failure does not prevent unrelated features loading;
+- remote-preference failures fall back to deterministic built-in defaults;
+- a per-package rapid-restart strike guard suppresses module loading after repeated restarts in the same short window;
+- dynamically inserted status-bar views receive layout params matching their actual parent container.
+
+These patterns and their upstream sources are documented in `docs/UPSTREAM.md`.
+
 ## Top-edge status bar
 
 This is not just a padding change.
@@ -33,7 +46,7 @@ Default: **20 dp bar height / 0 dp top padding / 0 dp translation**.
 
 The cutout clamp is independently switchable. Disable it if a future OTA changes cutout behaviour.
 
-## Build
+## Build and CI
 
 Requirements:
 - JDK 17
@@ -44,7 +57,32 @@ Requirements:
 gradle :app:assembleDebug
 ```
 
-GitHub Actions builds the debug APK on every push/PR and uploads it as an artifact.
+GitHub Actions CI runs on pushes to `main`, pull requests, and manual dispatch. It performs:
+
+- Bash/source invariant verification;
+- debug unit-test task;
+- Android lint;
+- debug APK assembly;
+- release-variant assembly;
+- tracked-source mutation check;
+- debug APK and lint-report artifact upload.
+
+A green CI build is required before treating a revision as installable.
+
+## Manual release
+
+`.github/workflows/release.yml` provides a deliberately simple **workflow_dispatch-only** release path. Releases are allowed only from the repository default branch and the requested tag must exactly match `v<versionName>` from `app/build.gradle.kts`.
+
+Configure these repository Actions secrets once:
+
+- `SIGNING_KEY` — base64-encoded JKS keystore;
+- `KEY_STORE_PASSWORD`;
+- `ALIAS`;
+- `KEY_PASSWORD`.
+
+Then open **Actions → Manual Release → Run workflow**, select the default branch, enter the version tag (for example `v0.1.0`), and choose whether it is a pre-release. The workflow builds the release variant, verifies the APK with `apksigner`, creates `SHA256SUMS.txt`, refuses to overwrite an existing release, and publishes both files to a GitHub Release.
+
+Signing material is generated only inside the Actions runner and removed in an `always()` cleanup step. It is ignored by Git.
 
 ## Install / activate
 
