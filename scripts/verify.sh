@@ -112,7 +112,7 @@ main() {
 
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'notification_min_height'
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'notification_icon_size'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'ConcurrentHashMap<Integer, ResourceKey>'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'resourceKeyCache = new ConcurrentHashMap<>()'
 
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'StatusIconContainer'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'NotificationIconContainer'
