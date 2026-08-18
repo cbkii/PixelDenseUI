@@ -1,170 +1,160 @@
-# Pixel Dense UI
+<div align="center">
 
-A focused **Android 16 / Pixel SystemUI** libxposed module for the subset of PixelXpert-style layout and visibility controls used by this project.
+# ✨ Pixel Dense UI
 
-## Current scope
+**A focused Android 16 SystemUI tuning module for stock Google Pixel devices.**
 
-- Pixel taskbar on phones.
-- Top-edge status bar with:
-  - height as **50–150% of stock**;
-  - raw start/end/top **pixel padding** controls;
-  - optional top-cutout safe-inset clamp without removing the physical cutout;
-  - stock/left/right clock position and optional seconds;
-  - status-bar icon spacing and notification-icon limit;
-  - compact RX/TX throughput.
-- Android 16 Compose Quick Settings density and grid controls.
-- Lockscreen visual controls:
-  - hide fingerprint background circle;
-  - hide fingerprint icon;
-  - keyguard wallpaper dim percentage.
-- Screenshot sound suppression with Android 16 QPR1/QPR2 fallbacks.
-- Compact notification spacing and icon sizing, including stronger silent-notification compression.
+[![Android 16](https://img.shields.io/badge/Android-16-3DDC84?logo=android&logoColor=white)](https://www.android.com/)
+[![libxposed API 101](https://img.shields.io/badge/libxposed-API%20101-6f42c1)](https://github.com/libxposed/api)
+[![CI](https://github.com/cbkii/PixelDenseUI/actions/workflows/build.yml/badge.svg)](https://github.com/cbkii/PixelDenseUI/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/cbkii/PixelDenseUI?include_prereleases)](https://github.com/cbkii/PixelDenseUI/releases)
+[![License: GPL-3.0](https://img.shields.io/github/license/cbkii/PixelDenseUI)](LICENSE)
 
-It intentionally does **not** contain broad theming engines, battery styles, volume mods, root hiding, unrestricted screenshots or unrelated PixelXpert functionality.
+Make more of the Pixel UI fit on screen: **denser Quick Settings, a compact top-edge status bar, compact notifications, lockscreen cleanup, screenshot mute, and the Pixel Launcher taskbar** — without becoming an all-in-one theming suite.
 
-## Requested defaults
+[📦 Releases](https://github.com/cbkii/PixelDenseUI/releases) · [⚙️ Advanced guide](docs/ADVANCED.md) · [🗺️ Roadmap](docs/ROADMAP.md) · [🤝 Contributing](CONTRIBUTING.md)
 
-The app now starts from this profile:
+</div>
 
-| Area | Default |
+> [!IMPORTANT]
+> Pixel Dense UI currently targets **stock Google Pixel Android 16** and was developed against the **Pixel 9a (`tegu`)** SystemUI/Pixel Launcher stack. Other Pixel models or Android builds are not yet validated.
+
+## 🌟 What it does
+
+### ⚡ Quick Settings
+
+- Scale QS sizing/spacing from **25–100%**.
+- Configure portrait **quick rows, full rows, and columns**.
+- Configure landscape columns independently while optionally leaving row counts at the SystemUI default.
+- Default layout: **50% sizing, 3 quick rows, 4 full rows, 7 columns**; landscape uses **12 columns**.
+
+### 📶 Status bar
+
+- Move status-bar content to the **top edge**, as far above/alongside the centre camera hole as practical while retaining the real display cutout.
+- Scale status-bar height from **50–150% of stock**.
+- Fine-tune **start/end/top padding in pixels** plus a small vertical offset.
+- Adjust system-icon spacing and the visible notification-icon limit.
+- Put the clock in the **stock, left, or right** position and optionally show **seconds**.
+- Show compact **upload/download speed** with an auto-hide threshold.
+
+### 🔒 Lock screen
+
+- Hide the fingerprint **background circle**.
+- Hide the fingerprint **icon**.
+- Adjust keyguard wallpaper dimming from **0–100%**.
+- Fingerprint hiding is visual only; it is not intended to disable UDFPS authentication or touch handling.
+
+### 🔔 Notifications & screenshots
+
+- Compress normal collapsed notification rows.
+- Apply stronger density and smaller icons to silent notifications.
+- Independently scale normal and silent notification icons.
+- Disable the screenshot sound.
+
+### 🧭 Pixel Launcher
+
+- Enable the tablet-style **Pixel taskbar on phones** using the native Pixel Launcher.
+
+## 🎛️ Default profile
+
+Pixel Dense UI starts with a deliberately dense profile that can be changed from the app:
+
+| Setting | Default |
 |---|---:|
 | QS sizing / spacing | 50% |
 | Portrait quick rows | 3 |
 | Portrait full rows | 4 |
 | Portrait columns | 7 |
-| Landscape quick rows | System default (`0`) |
-| Landscape full rows | System default (`0`) |
+| Landscape quick/full rows | System default |
 | Landscape columns | 12 |
 | Status-bar height | 100% of stock |
-| Status-bar start/end padding | Stock (`-1`) |
+| Status-bar start/end padding | Stock |
 | Status-bar top padding | 0 px |
 | Clock | Left + seconds |
-| Fingerprint background circle | Hidden |
-| Fingerprint icon | Hidden |
+| Network traffic | Enabled |
+| Fingerprint circle + icon | Hidden |
 | Keyguard wallpaper dim | 66% |
 | Screenshot sound | Disabled |
+| Normal notification density | 72% |
+| Silent notification density | 55% |
 
-The status-bar height percentage is deliberately left at a safe 100% default because no preferred percentage was specified; it can be adjusted from 50–150%.
+## 📲 Install
 
-## Device target and evidence boundary
+### Requirements
 
-The initial hook map was derived from the supplied Android 16 Pixel SystemUI APK; see `docs/DEVICE_HOOK_MAP.md` and `docs/APK_EVIDENCE.md`.
+- A **stock Google Pixel** running **Android 16**.
+- A working **API-101-capable libxposed/Xposed runtime** that can hook Android system processes.
+- Native **Pixel Launcher** for the taskbar feature.
 
-The new UDFPS, keyguard-dim and screenshot targets are derived from current PixelXpert canary implementations and are intentionally treated as **optional/fail-soft** until confirmed against the current device SystemUI build. Missing/renamed targets disable only that feature family.
+### Steps
 
-## Reliability model
-
-Pixel Dense UI keeps a narrow feature set while adopting battle-tested failure boundaries from PixelXpert:
-
-- hook registration targets only methods **declared by the intended class**;
-- optional/version-drifted classes disable only their affected path;
-- framework, main-SystemUI, lockscreen, notification, screenshot-child-process and Launcher hook families install independently;
-- remote-preference failures fall back to deterministic defaults;
-- rapid-restart protection is keyed by **process**, so the short-lived SystemUI screenshot process cannot accumulate bootloop strikes against main SystemUI;
-- dynamically inserted status-bar views receive parent-compatible layout params.
-
-See `docs/UPSTREAM.md` for provenance.
-
-## Status-bar / cutout policy
-
-Pixel Dense UI scales the stock result returned by `SystemBarUtils.getStatusBarHeight*()` rather than replacing it with a fixed dp value. The same percentage is used for the SystemUI status-bar resource/view and top cutout clamp.
-
-The physical centre cutout is retained. Pixel Dense UI never substitutes `DisplayCutout.NO_CUTOUT` and does not intentionally force content through the camera region.
-
-See `docs/STATUS_BAR_INSET_POLICY.md`.
-
-## Quick Settings policy
-
-Portrait defaults are **3 quick rows / 4 full rows / 7 columns** at **50% density**. Landscape defaults preserve SystemUI's row counts and request **12 columns**. A landscape row setting of `0` means “leave the platform value unchanged”.
-
-The implementation uses the Android 16 Compose-QS repository/resource strategy used by current PixelXpert, with constructor-injected resource wrappers as the narrow primary path and name-filtered resource interception as fallback.
-
-## Lockscreen and screenshot policy
-
-Fingerprint hiding changes only `DeviceEntryIconView` graphics (`iconView` / `bgView`) and does not disable UDFPS authentication or touch handling.
-
-Keyguard dim follows PixelXpert's `ScrimController` / `ScrimState` approach and preserves the platform's known bedtime-mode wallpaper dim value.
-
-Screenshot sound suppression is loaded only in the `com.android.systemui:*screenshot*` child process. This keeps the MediaPlayer fallback isolated from main SystemUI while retaining QPR1/QPR2 controller fallbacks.
-
-## Roadmap
-
-**Status-bar ignored-icon selection is not implemented yet.** The analogous PixelXpert feature mutates a private `mIgnoredSlots` list in `IconManager` containers; it is reported unreliable for this target. Pixel Dense UI will instead validate the Android 16 slot pipeline and implement reversible per-slot filtering before icon materialisation.
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the implementation criteria and other follow-up work.
-
-## Build and CI
-
-Requirements:
-- JDK 17
-- Android SDK 36
-- Gradle 9.3.1
-
-```bash
-gradle :app:assembleDebug
-```
-
-GitHub Actions CI runs on pushes to `main`, pull requests, and manual dispatch. It performs:
-
-- Bash/source invariant verification;
-- debug unit tests;
-- Android lint;
-- debug and release-variant assembly;
-- an ephemeral release-signing smoke test using a CI-only keystore and `apksigner verify`;
-- repository cleanliness verification;
-- APK and lint-report artifact upload.
-
-A green CI build is required before treating a revision as installable.
-
-## Manual release
-
-`.github/workflows/release.yml` is **workflow_dispatch-only** and follows the same automatic versioning model used by the project's other maintained Android release workflows.
-
-Release version behaviour:
-
-- leave the version/tag input blank to create the **next patch** from the current `versionName`;
-- enter `0.1.1` or `v0.1.1` to explicitly select that version;
-- a new version increments `versionCode` by one;
-- the workflow rewrites `app/build.gradle.kts`, builds/tests/lints/signs that exact source tree, then commits `chore(release): prepare vX.Y.Z` and pushes it back to `main` using a guarded `--force-with-lease`;
-- if the requested version already equals the unreleased codebase version, the existing `versionCode` is retained, allowing an interrupted publication to be resumed explicitly without incrementing twice;
-- existing Git tags/releases are immutable and are never overwritten.
-
-The release job uses the `release` GitHub Environment and these repository/environment secret names:
-
-- `KEYSTORE_BASE64` — base64-encoded JKS keystore;
-- `KEYSTORE_PASSWORD`;
-- `KEY_ALIAS`;
-- `KEY_PASSWORD`.
-
-Before changing `main`, the workflow validates all four signing secrets, decodes and inspects the keystore/alias, runs repository verification, unit tests, release lint and a signed release build, and verifies the APK with `apksigner`. Only after those gates pass does it commit/push the source metadata and publish the GitHub Release with `SHA256SUMS.txt`.
-
-If publication itself fails after the metadata commit, rerun the workflow with that explicit unreleased version to resume from the already-updated source metadata. Signing material is removed in an `always()` cleanup step.
-
-## Install / activate
-
-1. Build/install the APK.
-2. Enable **Pixel Dense UI** in an API-101-capable LSPosed/libxposed framework.
-3. Keep the static scopes:
-   - `android` (system server)
+1. Download the APK from **[GitHub Releases](https://github.com/cbkii/PixelDenseUI/releases)** and install it.
+2. Enable **Pixel Dense UI** in your libxposed/LSPosed-compatible manager.
+3. Keep these scopes enabled:
+   - `android`
    - `com.android.systemui`
    - `com.google.android.apps.nexuslauncher`
-4. Disable overlapping PixelXpert hooks before physical validation.
-5. Reboot for the first deterministic validation.
+4. Disable overlapping PixelXpert/Iconify hooks for the same UI areas while testing Pixel Dense UI.
+5. Open **Pixel Dense UI** and choose your settings.
+6. **Reboot** for the first deterministic validation after enabling the module or making major layout changes.
 
-## Validation order
+> [!TIP]
+> Start with the defaults, confirm SystemUI/lockscreen/Launcher stability, then change one density or geometry control at a time.
 
-1. boot/main-SystemUI stability;
-2. screenshot child-process stability + muted capture;
-3. status-bar height/padding/cutout alignment;
-4. clock position + seconds;
-5. QS portrait and landscape density/grid;
-6. fingerprint visuals + unlock functionality;
-7. keyguard dim;
-8. notifications;
-9. taskbar/Recents.
+## 🧩 Scope by design
 
-See `docs/VALIDATION.md` and `docs/BUILD_STATUS.md`.
+Pixel Dense UI is intentionally small. It focuses on density, layout and a few practical visibility/behaviour controls. It does **not** try to replace full customisation suites with battery themes, colour engines, volume-panel mods, root hiding, unrestricted screenshot features, or hundreds of unrelated toggles.
 
-## License / upstream
+That narrow scope is deliberate: fewer hooks are easier to understand, validate and repair when Google changes SystemUI in an OTA.
 
-GPL-3.0-only. Small implementation patterns are deliberately attributed to their GPLv3 upstream sources. See `docs/UPSTREAM.md` and `NOTICE.md`.
+## 🚧 Current limitations
+
+- **Ignored status-bar icon selection is planned, not implemented.** The current roadmap calls for a more reliable Android 16 slot-level implementation instead of copying the unreliable container-mutation path used by PixelXpert.
+- Private SystemUI classes can change between Pixel OTAs. Pixel Dense UI uses fail-soft hook boundaries, but a new build may still require updated targets.
+- Pixel 9a / Android 16 is the current validation target; support on other Pixels is not yet claimed.
+- Some changes apply most deterministically after the affected process is recreated; a reboot is the clean baseline.
+
+See **[ROADMAP.md](docs/ROADMAP.md)** for planned work.
+
+## 🛟 If something goes wrong
+
+If SystemUI, the lockscreen, screenshot process or Pixel Launcher behaves incorrectly after an OTA or setting change:
+
+1. disable Pixel Dense UI in your Xposed/libxposed manager;
+2. reboot to return the affected processes to stock behaviour;
+3. re-enable the module and test one feature family at a time;
+4. capture the Android build, module version and relevant logs before reporting a reproducible issue.
+
+More detail: **[Advanced use & troubleshooting](docs/ADVANCED.md)** and **[validation checklist](docs/VALIDATION.md)**.
+
+## 📚 Documentation
+
+| Audience | Document |
+|---|---|
+| End users | **This README** |
+| Advanced users / troubleshooting | [docs/ADVANCED.md](docs/ADVANCED.md) |
+| Developers / maintainers | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
+| Contributors | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| Planned work | [docs/ROADMAP.md](docs/ROADMAP.md) |
+| Runtime validation | [docs/VALIDATION.md](docs/VALIDATION.md) |
+| Build evidence | [docs/BUILD_STATUS.md](docs/BUILD_STATUS.md) |
+| Detailed upstream provenance | [docs/UPSTREAM.md](docs/UPSTREAM.md) |
+| Licensing notices | [NOTICE.md](NOTICE.md) |
+
+## 🙏 Credits & thanks
+
+Pixel Dense UI exists because several open-source Android/Xposed projects made the hard parts understandable and reusable. **Thank you to their maintainers and contributors.**
+
+- **[PixelXpert](https://github.com/siavash79/PixelXpert)** by **siavash79** — the primary battle-tested reference for Pixel status-bar geometry, clock/traffic behaviour, Android 16 Compose QS hooks, lockscreen/UDFPS handling, screenshot fallbacks, reflection safety and restart protection.
+- **[Pixel Taskbar Enabler](https://github.com/beymans-code/pixel-taskbar-enabler)** by **beymans-code** — the basis/reference for enabling the native Pixel Launcher tablet taskbar on phones.
+- **[Iconify](https://github.com/Mahmud0808/Iconify)** by **Mahmud0808** and contributors — an independent Android 16 reference for the Compose Quick Settings repository/resource-wrapper strategy.
+- **[libxposed](https://github.com/libxposed)** and its **[example module](https://github.com/libxposed/example)** — the modern Xposed API/service foundation used by this project.
+- **[JingMatrix/libxposed-example](https://github.com/JingMatrix/libxposed-example)** — a current API-100+ example used while aligning the module with modern libxposed conventions.
+- **[LSPosed](https://github.com/LSPosed/LSPosed)** and the wider Xposed ecosystem — for the framework, tooling and community knowledge that make this kind of system modification possible.
+- **[Android Open Source Project](https://android.googlesource.com/platform/frameworks/base/)** — for Android framework/SystemUI source and the reference architecture used to understand the platform behaviour being modified.
+
+Pixel Dense UI does **not** claim these hook techniques as original inventions. Feature-level provenance and intentional deviations are documented in **[docs/UPSTREAM.md](docs/UPSTREAM.md)** and **[NOTICE.md](NOTICE.md)**.
+
+## 📄 License
+
+Pixel Dense UI is licensed under **GPL-3.0-only**. See [LICENSE](LICENSE).
