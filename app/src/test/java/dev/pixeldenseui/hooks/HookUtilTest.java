@@ -16,6 +16,15 @@ public final class HookUtilTest {
     private static final class Child extends Parent {
         @SuppressWarnings("unused")
         public void declaredTarget() {}
+
+        @SuppressWarnings("unused")
+        public void overloadedTarget() {}
+
+        @SuppressWarnings("unused")
+        public void overloadedTarget(String arg) {}
+
+        @SuppressWarnings("unused")
+        protected void overloadedTarget(int arg) {}
     }
 
     @Test
@@ -26,5 +35,20 @@ public final class HookUtilTest {
     @Test
     public void methodsNamedFindsDeclaredTarget() {
         assertEquals(1, HookUtil.methodsNamed(Child.class, "declaredTarget").size());
+    }
+
+    @Test
+    public void methodsNamedHandlesNullClass() {
+        assertEquals(0, HookUtil.methodsNamed(null, "anyName").size());
+    }
+
+    @Test
+    public void methodsNamedReturnsEmptyForUnknownName() {
+        assertEquals(0, HookUtil.methodsNamed(Child.class, "missingTarget").size());
+    }
+
+    @Test
+    public void methodsNamedFindsAllDeclaredOverloads() {
+        assertEquals(3, HookUtil.methodsNamed(Child.class, "overloadedTarget").size());
     }
 }
