@@ -17,7 +17,6 @@ import android.os.SystemClock;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
 import android.widget.TextView;
 
 import java.util.Locale;
@@ -43,10 +42,10 @@ public final class NetworkTrafficController {
         view.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
         int hp = HookUtil.dp(view.getResources(), 2);
         view.setPadding(hp, 0, hp, 0);
-        view.setLayoutParams(new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // Parent-specific LayoutParams are assigned immediately before insertion by
+        // StatusBarHooks. A generic ViewGroup.LayoutParams can later crash a
+        // LinearLayout/FrameLayout during measure/layout.
         view.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override public void onViewAttachedToWindow(View v) { start(); }
             @Override public void onViewDetachedFromWindow(View v) { stop(); }
@@ -66,12 +65,25 @@ public final class NetworkTrafficController {
     private final Runnable update = new Runnable() {
         @Override public void run() {
             if (!view.isAttachedToWindow()) return;
+
             long now = SystemClock.elapsedRealtime();
             long rx = TrafficStats.getTotalRxBytes();
             long tx = TrafficStats.getTotalTxBytes();
+
+            if (rx == TrafficStats.UNSUPPORTED || tx == TrafficStats.UNSUPPORTED) {
+                view.setVisibility(View.GONE);
+                lastRx = rx;
+                lastTx = tx;
+                lastTime = now;
+                handler.postDelayed(this, config.networkRefreshMs());
+                return;
+            }
+
             long dt = Math.max(1, now - lastTime);
-            long rxps = Math.max(0, Math.round((rx - lastRx) * 1000d / dt));
-            long txps = Math.max(0, Math.round((tx - lastTx) * 1000d / dt));
+            long rxDelta = lastRx >= 0 && rx >= lastRx ? rx - lastRx : 0;
+            long txDelta = lastTx >= 0 && tx >= lastTx ? tx - lastTx : 0;
+            long rxps = Math.max(0, Math.round(rxDelta * 1000d / dt));
+            long txps = Math.max(0, Math.round(txDelta * 1000d / dt));
             lastRx = rx;
             lastTx = tx;
             lastTime = now;
@@ -105,6 +117,7 @@ public final class NetworkTrafficController {
             Network n = cm == null ? null : cm.getActiveNetwork();
             return n != null;
         } catch (Throwable ignored) {
+            // TrafficStats itself remains authoritative enough to continue sampling.
             return true;
         }
     }
