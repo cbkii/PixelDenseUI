@@ -44,18 +44,22 @@ public final class HookUtil {
         return null;
     }
 
+    /**
+     * Return only methods declared by the requested hook class.
+     *
+     * PixelXpert's HookHelper deliberately uses getDeclaredMethods() for hook
+     * registration. Walking superclasses here can accidentally hook a framework
+     * method such as View#onFinishInflate when an expected SystemUI override is
+     * absent, widening a narrowly-scoped hook to a large part of the process.
+     */
     public static List<Method> methodsNamed(Class<?> cls, String name) {
         ArrayList<Method> out = new ArrayList<>();
         if (cls == null) return out;
-        Class<?> cursor = cls;
-        while (cursor != null) {
-            for (Method method : cursor.getDeclaredMethods()) {
-                if (method.getName().equals(name)) {
-                    try { method.setAccessible(true); } catch (Throwable ignored) {}
-                    out.add(method);
-                }
+        for (Method method : cls.getDeclaredMethods()) {
+            if (method.getName().equals(name)) {
+                try { method.setAccessible(true); } catch (Throwable ignored) {}
+                out.add(method);
             }
-            cursor = cursor.getSuperclass();
         }
         return out;
     }
@@ -128,6 +132,10 @@ public final class HookUtil {
         try { return res.getResourceEntryName(id); } catch (Throwable ignored) { return ""; }
     }
 
+    public static String resourcePackageName(Resources res, int id) {
+        try { return res.getResourcePackageName(id); } catch (Throwable ignored) { return ""; }
+    }
+
     public static int id(View view, String name) {
         try {
             return view.getResources().getIdentifier(name, "id", view.getContext().getPackageName());
@@ -149,12 +157,31 @@ public final class HookUtil {
             try {
                 module.hook(method).intercept(hooker);
             } catch (Throwable t) {
-                module.log(Log.ERROR, TAG, "hook failed " + cls.getName() + "#" + methodName + ": " + t, t);
+                logError(module, "hook failed " + cls.getName() + "#" + methodName, t);
             }
+        }
+    }
+
+    /** Install one independent hook pack without preventing later packs from loading. */
+    public static boolean installSafely(XposedModule module, String name, Runnable installer) {
+        try {
+            installer.run();
+            return true;
+        } catch (Throwable t) {
+            logError(module, name + " installation failed", t);
+            return false;
         }
     }
 
     public static void log(XposedModule module, String msg) {
         try { module.log(Log.INFO, TAG, msg); } catch (Throwable ignored) { Log.d(TAG, msg); }
+    }
+
+    public static void logWarning(XposedModule module, String msg) {
+        try { module.log(Log.WARN, TAG, msg); } catch (Throwable ignored) { Log.w(TAG, msg); }
+    }
+
+    public static void logError(XposedModule module, String msg, Throwable t) {
+        try { module.log(Log.ERROR, TAG, msg, t); } catch (Throwable ignored) { Log.e(TAG, msg, t); }
     }
 }
