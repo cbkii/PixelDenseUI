@@ -122,7 +122,10 @@ public final class SystemUiResourceHooks {
                     if ("status_bar_padding_top".equals(name)
                             || "status_bar_icons_padding_top".equals(name)
                             || "status_bar_icons_padding_bottom".equals(name)) {
-                        return config.statusBarTopPaddingPx();
+                        // The configured top distance is now applied once at
+                        // status_bar_contents. Returning it from these nested resources
+                        // stacked the offset differently for clock/icons/battery.
+                        return 0;
                     }
                     if ("status_bar_system_icon_spacing".equals(name)
                             || "status_bar_icon_horizontal_margin".equals(name)) {
@@ -132,6 +135,9 @@ public final class SystemUiResourceHooks {
 
                 if (!SYSTEMUI_PACKAGE.equals(pkg)) return original;
 
+                if (isQsTileHeightDimen(name)) {
+                    return scale(original, config.qsTileHeightPercent(), HookUtil.dp(res, 24));
+                }
                 if (isQsDensityDimen(name)) {
                     return scale(original, config.qsDensityPercent(), 1);
                 }
@@ -154,6 +160,13 @@ public final class SystemUiResourceHooks {
 
     private static boolean isSystemBarResourcePackage(String pkg) {
         return SYSTEMUI_PACKAGE.equals(pkg) || ANDROID_PACKAGE.equals(pkg);
+    }
+
+    private static boolean isQsTileHeightDimen(String n) {
+        // Present in the target Android 16 SystemUI APK and used by the Compose
+        // common-tile path. Keep this deliberately narrower than the general
+        // density setting so vertical size can be tuned independently.
+        return "common_tile_default_tile_height".equals(n);
     }
 
     private static boolean isQsDensityDimen(String n) {

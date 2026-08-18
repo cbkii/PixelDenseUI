@@ -24,18 +24,22 @@ Make more of the Pixel UI fit on screen: **denser Quick Settings, a compact top-
 ### ⚡ Quick Settings
 
 - Scale QS sizing/spacing from **25–100%**.
+- Independently shrink the Compose tile **height from 50–100% of stock**.
 - Configure portrait **quick rows, full rows, and columns**.
 - Configure landscape columns independently while optionally leaving row counts at the SystemUI default.
-- Default layout: **50% sizing, 3 quick rows, 4 full rows, 7 columns**; landscape uses **12 columns**.
+- Default layout: **50% sizing, 100% tile height, 3 quick rows, 4 full rows, 8 columns**; landscape uses **12 columns**.
 
 ### 📶 Status bar
 
 - Move status-bar content to the **top edge**, as far above/alongside the centre camera hole as practical while retaining the real display cutout.
 - Scale status-bar height from **50–150% of stock**.
-- Fine-tune **start/end/top padding in pixels** plus a small vertical offset.
+- Set one common **content distance from the physical top edge in pixels**, plus start/end padding and a small vertical fine offset.
 - Adjust system-icon spacing and the visible notification-icon limit.
-- Put the clock in the **stock, left, or right** position and optionally show **seconds**.
+- Put the clock in the **stock, left, right, or centre** position and optionally show **seconds**.
 - Show compact **upload/download speed** with an auto-hide threshold.
+
+> [!NOTE]
+> Centre clock means literal screen centre. On a Pixel with a centre punch-hole it can overlap the camera cutout; use it only when your chosen status-bar geometry leaves suitable room.
 
 ### 🔒 Lock screen
 
@@ -51,6 +55,9 @@ Make more of the Pixel UI fit on screen: **denser Quick Settings, a compact top-
 - Independently scale normal and silent notification icons.
 - Disable the screenshot sound.
 
+> [!WARNING]
+> Notification rendering/performance is under active redesign after testing exposed oversized row icons, grouped-icon corruption and shade jank. The next implementation will replace the current hot-path scaling approach rather than stack more tuning on top of it.
+
 ### 🧭 Pixel Launcher
 
 - Enable the tablet-style **Pixel taskbar on phones** using the native Pixel Launcher.
@@ -62,14 +69,15 @@ Pixel Dense UI starts with a deliberately dense profile that can be changed from
 | Setting | Default |
 |---|---:|
 | QS sizing / spacing | 50% |
+| QS tile height | 100% of stock |
 | Portrait quick rows | 3 |
 | Portrait full rows | 4 |
-| Portrait columns | 7 |
+| Portrait columns | 8 |
 | Landscape quick/full rows | System default |
 | Landscape columns | 12 |
 | Status-bar height | 100% of stock |
 | Status-bar start/end padding | Stock |
-| Status-bar top padding | 0 px |
+| Status-bar content distance from top | 0 px |
 | Clock | Left + seconds |
 | Network traffic | Enabled |
 | Fingerprint circle + icon | Hidden |
@@ -110,6 +118,7 @@ That narrow scope is deliberate: fewer hooks are easier to understand, validate 
 ## 🚧 Current limitations
 
 - **Ignored status-bar icon selection is planned, not implemented.** The current roadmap calls for a more reliable Android 16 slot-level implementation instead of copying the unreliable container-mutation path used by PixelXpert.
+- The notification density/icon implementation is scheduled for a low-overhead redesign before further visual tuning.
 - Private SystemUI classes can change between Pixel OTAs. Pixel Dense UI uses fail-soft hook boundaries, but a new build may still require updated targets.
 - Pixel 9a / Android 16 is the current validation target; support on other Pixels is not yet claimed.
 - Some changes apply most deterministically after the affected process is recreated; a reboot is the clean baseline.

@@ -68,25 +68,27 @@ public final class SettingsActivity extends Activity {
         seek("Status bar height", "statusbar_height_percent", 100, 50, 150, "% of stock");
         seek("Start padding (-1 = stock)", "statusbar_padding_start_px", -1, -1, 240, " px");
         seek("End padding (-1 = stock)", "statusbar_padding_end_px", -1, -1, 240, " px");
-        seek("Top content padding", "statusbar_top_padding_px", 0, 0, 48, " px");
-        seek("Vertical offset", "statusbar_y_offset_dp", 0, -4, 4, " dp");
+        seek("Content distance from top", "statusbar_top_padding_px", 0, 0, 48, " px");
+        seek("Vertical fine offset", "statusbar_y_offset_dp", 0, -4, 4, " dp");
         seek("System icon spacing", "statusbar_icon_spacing_dp", 1, 0, 8, " dp");
         seek("Notification icons visible", "statusbar_icon_limit", 8, 4, 14, "");
 
         section("Clock and traffic");
-        seek("Clock position (0 stock / 1 left / 2 right)", "clock_position", 1, 0, 2, "");
+        seek("Clock position (0 stock / 1 left / 2 right / 3 centre)", "clock_position", 1, 0, 3, "");
+        content.addView(text("Centre position is literal screen centre and may overlap the camera cutout on punch-hole Pixels.", 13, false));
         toggle("Display clock seconds", "clock_show_seconds", true);
         toggle("Show upload/download speed", "network_traffic_enabled", true);
         seek("Auto-hide below", "network_autohide_kb", 1, 0, 64, " KB/s");
 
         section("Quick Settings — portrait");
         seek("QS sizing / spacing", "qs_density_percent", 50, 25, 100, "%");
+        seek("Tile height", "qs_tile_height_percent", 100, 50, 100, "% of stock");
         seek("Quick rows", "qqs_rows", 3, 1, 6, "");
         seek("Full rows", "qs_rows", 4, 1, 8, "");
-        seek("Columns", "qs_columns", 7, 2, 16, "");
+        seek("Columns", "qs_columns", 8, 2, 16, "");
 
         section("Quick Settings — landscape");
-        content.addView(text("Row value 0 keeps SystemUI's landscape default.", 13, false));
+        content.addView(text("Row value 0 keeps SystemUI's landscape default. Tile height uses the same percentage as portrait.", 13, false));
         seek("Quick rows", "qqs_rows_landscape", 0, 0, 6, "");
         seek("Full rows", "qs_rows_landscape", 0, 0, 8, "");
         seek("Columns", "qs_columns_landscape", 12, 2, 16, "");
@@ -104,6 +106,7 @@ public final class SettingsActivity extends Activity {
         seek("Silent collapsed-row density", "silent_notification_density_percent", 55, 42, 100, "%");
         seek("Normal notification icon size", "notification_icon_percent", 84, 60, 100, "%");
         seek("Silent notification icon size", "silent_notification_icon_percent", 72, 50, 100, "%");
+        content.addView(text("Notification rendering/performance is being redesigned separately; avoid aggressive icon tuning until that work lands.", 13, false));
 
         section("Apply");
         content.addView(text("SystemUI, lockscreen and screenshot-process hook changes are applied deterministically after process recreation; reboot is the clean validation boundary.", 13, false));

@@ -23,6 +23,7 @@ public final class StatusBarHooks {
     private final ClassLoader cl;
     private final ModuleConfig config;
     private final WeakHashMap<View, NetworkTrafficController> trafficControllers = new WeakHashMap<>();
+    private final WeakHashMap<View, LinearLayout> centeredClockContainers = new WeakHashMap<>();
 
     public StatusBarHooks(XposedModule module, ClassLoader cl, ModuleConfig config) {
         this.module = module;
@@ -82,26 +83,35 @@ public final class StatusBarHooks {
 
     private void apply(View root) {
         try {
-            if (config.topEdgeStatusBar()) applyTopEdge(root);
+            boolean topEdge = config.topEdgeStatusBar();
+            if (topEdge) prepareTopEdge(root);
+
             TextView clock = HookUtil.findByName(root, "clock");
             if (clock != null) {
                 clock.setIncludeFontPadding(false);
                 clock.setGravity((clock.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP);
                 moveClock(root, clock);
             }
-            if (config.networkTrafficEnabled()) ensureTraffic(root, clock);
+
+            View traffic = null;
+            if (config.networkTrafficEnabled()) traffic = ensureTraffic(root, clock);
+
+            // Re-run the cheap hierarchy-only gravity pass after clock/traffic re-parenting.
+            // This avoids the old behaviour where the outer right side was top-aligned but
+            // a relocated clock or nested icon container retained centre-vertical gravity.
+            if (topEdge) finishTopEdge(root, clock, traffic);
         } catch (Throwable t) {
             HookUtil.logWarning(module, "status-bar apply skipped: " + t);
         }
     }
 
-    private void applyTopEdge(View root) {
+    private void prepareTopEdge(View root) {
         int fallback = root.getHeight() > 0 ? root.getHeight() : HookUtil.dp(root.getResources(), 24);
         int height = HookUtil.scaledSystemDimensionPx(
                 root.getResources(), "status_bar_height", config.statusBarHeightPercent(), fallback);
-        int topPad = config.statusBarTopPaddingPx();
-        int startPad = config.statusBarPaddingStartPx();
-        int endPad = config.statusBarPaddingEndPx();
+        int topPx = config.statusBarTopPaddingPx();
+        int startPx = config.statusBarPaddingStartPx();
+        int endPx = config.statusBarPaddingEndPx();
         int yOffset = HookUtil.dp(root.getResources(), config.statusBarYOffsetDp());
 
         ViewGroup.LayoutParams rootLp = root.getLayoutParams();
@@ -109,31 +119,45 @@ public final class StatusBarHooks {
             rootLp.height = height;
             root.setLayoutParams(rootLp);
         }
+
+        // Keep the optional fine offset separate from the absolute top-edge padding.
+        // The px-from-top value is applied exactly once at the common contents anchor.
         root.setTranslationY(yOffset);
         root.setPadding(root.getPaddingLeft(), 0, root.getPaddingRight(), 0);
 
-        for (String id : new String[]{
-                "status_bar_contents",
-                "status_bar_start_side_container",
-                "status_bar_start_side_content",
-                "status_bar_start_side_except_heads_up",
-                "status_bar_end_side_container",
-                "status_bar_end_side_content",
-                "system_icons",
-                "system_icons_container",
-                "notification_icon_area"
-        }) {
-            View child = HookUtil.findByName(root, id);
-            if (child == null) continue;
+        View contents = HookUtil.findByName(root, "status_bar_contents");
+        if (contents == null) contents = root;
+        int start = startPx < 0 ? contents.getPaddingStart() : startPx;
+        int end = endPx < 0 ? contents.getPaddingEnd() : endPx;
+        contents.setPaddingRelative(start, topPx, end, 0);
+    }
 
-            if ("status_bar_contents".equals(id)) {
-                int start = startPad < 0 ? child.getPaddingStart() : startPad;
-                int end = endPad < 0 ? child.getPaddingEnd() : endPad;
-                child.setPaddingRelative(start, topPad, end, 0);
-            } else {
-                child.setPadding(child.getPaddingLeft(), topPad, child.getPaddingRight(), 0);
-            }
+    private void finishTopEdge(View root, TextView clock, View traffic) {
+        View contents = HookUtil.findByName(root, "status_bar_contents");
+        forceTopGravity(contents != null ? contents : root);
 
+        // A centered clock is hosted directly under PhoneStatusBarView rather than
+        // status_bar_contents, mirroring PixelXpert's dedicated centered container.
+        LinearLayout center = centeredClockContainers.get(root);
+        if (center != null) forceTopGravity(center);
+        if (clock != null) forceTopGravity(clock);
+        if (traffic != null) forceTopGravity(traffic);
+    }
+
+    private static void forceTopGravity(View view) {
+        if (view == null) return;
+
+        if (view instanceof TextView text) {
+            text.setGravity((text.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP);
+        }
+        if (!(view instanceof ViewGroup group)) return;
+
+        if (group instanceof LinearLayout linear) {
+            linear.setGravity((linear.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP);
+        }
+
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
             ViewGroup.LayoutParams lp = child.getLayoutParams();
             if (lp instanceof FrameLayout.LayoutParams flp) {
                 flp.gravity = (flp.gravity & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP;
@@ -142,9 +166,7 @@ public final class StatusBarHooks {
                 llp.gravity = (llp.gravity & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP;
                 child.setLayoutParams(llp);
             }
-            if (child instanceof LinearLayout linear) {
-                linear.setGravity((linear.getGravity() & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.TOP);
-            }
+            forceTopGravity(child);
         }
     }
 
@@ -153,24 +175,46 @@ public final class StatusBarHooks {
         if (position == 0) return;
 
         ViewGroup target;
-        int index;
+        int index = 0;
         if (position == 1) {
             target = HookUtil.findByName(root, "status_bar_start_side_except_heads_up");
             if (target == null) target = HookUtil.findByName(root, "status_bar_start_side_content");
-            index = 0;
-        } else {
+        } else if (position == 2) {
             View systemIcons = HookUtil.findByName(root, "system_icons");
             if (systemIcons == null) systemIcons = HookUtil.findByName(root, "system_icons_container");
             target = systemIcons != null && systemIcons.getParent() instanceof ViewGroup vg ? vg : null;
-            index = 0;
+        } else {
+            target = centeredClockContainer(root);
         }
         if (target == null || clock.getParent() == target) return;
 
         if (clock.getParent() instanceof ViewGroup old) old.removeView(clock);
+        applyParentCompatibleLayoutParams(clock, target);
         target.addView(clock, Math.min(index, target.getChildCount()));
     }
 
-    private void ensureTraffic(View root, TextView clock) {
+    private ViewGroup centeredClockContainer(View root) {
+        LinearLayout existing = centeredClockContainers.get(root);
+        if (existing != null && existing.getParent() != null) return existing;
+        if (!(root instanceof FrameLayout frame)) {
+            HookUtil.logWarning(module, "center clock unavailable: PhoneStatusBarView is not a FrameLayout");
+            return null;
+        }
+
+        LinearLayout center = new LinearLayout(root.getContext());
+        center.setOrientation(LinearLayout.HORIZONTAL);
+        center.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        center.setLayoutParams(lp);
+        frame.addView(center);
+        centeredClockContainers.put(root, center);
+        return center;
+    }
+
+    private View ensureTraffic(View root, TextView clock) {
         NetworkTrafficController controller = trafficControllers.get(root);
         if (controller == null) {
             controller = new NetworkTrafficController(root.getContext(), config);
@@ -188,12 +232,14 @@ public final class StatusBarHooks {
             target = HookUtil.findByName(root, "status_bar_start_side_except_heads_up");
             if (target == null) target = HookUtil.findByName(root, "status_bar_start_side_content");
         }
-        if (target == null) return;
+        if (target == null) return traffic;
 
-        if (traffic.getParent() == target) return;
-        if (traffic.getParent() instanceof ViewGroup old) old.removeView(traffic);
-        applyParentCompatibleLayoutParams(traffic, target);
-        target.addView(traffic);
+        if (traffic.getParent() != target) {
+            if (traffic.getParent() instanceof ViewGroup old) old.removeView(traffic);
+            applyParentCompatibleLayoutParams(traffic, target);
+            target.addView(traffic);
+        }
+        return traffic;
     }
 
     private static void applyParentCompatibleLayoutParams(View child, ViewGroup parent) {

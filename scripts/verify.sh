@@ -93,7 +93,12 @@ main() {
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_density_percent", 50)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns", 8)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_tile_height_percent", 100)'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns_landscape", 12)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("clock_position", 1), 0, 3'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'common_tile_default_tile_height'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'Gravity.TOP | Gravity.CENTER_HORIZONTAL'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("keyguard_wallpaper_dim_percent", 66)'
     require_text "$ROOT_DIR/docs/ROADMAP.md" 'Status-bar ignored icons'
 
