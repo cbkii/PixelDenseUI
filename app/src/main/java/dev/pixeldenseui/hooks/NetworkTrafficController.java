@@ -6,6 +6,7 @@
  */
 package dev.pixeldenseui.hooks;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Typeface;
 import android.net.ConnectivityManager;
@@ -111,13 +112,20 @@ public final class NetworkTrafficController {
         handler.removeCallbacks(update);
     }
 
+    /**
+     * This code executes inside SystemUI after libxposed injection. The permission
+     * belongs to the host process, not the PixelDenseUI settings APK. PixelXpert uses
+     * the same targeted lint suppression for its injected connectivity query.
+     */
+    @SuppressLint("MissingPermission")
     private boolean connected() {
         try {
             ConnectivityManager cm = view.getContext().getSystemService(ConnectivityManager.class);
             Network n = cm == null ? null : cm.getActiveNetwork();
             return n != null;
         } catch (Throwable ignored) {
-            // TrafficStats itself remains authoritative enough to continue sampling.
+            // If a host build removes access, TrafficStats itself remains sufficient to
+            // continue sampling instead of crashing SystemUI.
             return true;
         }
     }
