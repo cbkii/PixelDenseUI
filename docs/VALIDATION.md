@@ -2,7 +2,7 @@
 
 Do not enable overlapping PixelXpert/Iconify hooks for the same SystemUI/Launcher areas during first validation.
 
-## 0. Baseline
+## 0. Baseline and settings-service state
 
 Record the build and framework state:
 
@@ -10,14 +10,20 @@ Record the build and framework state:
 su -c 'getprop ro.build.fingerprint; getprop ro.build.version.incremental'
 ```
 
-Open Pixel Dense UI and confirm the diagnostics line reports the current build and all four required scopes:
+Pixel Dense UI now renders its settings immediately even if Vector has not yet delivered the module-app Xposed service. Until that service arrives, controls are deliberately **read-only** and show last-known/default values; PixelDenseUI does not write a second local configuration because host processes consume Vector remote preferences.
+
+When the service connects, confirm the header reports the current build and all four required scopes:
 
 - `system` — modern libxposed/Vector system-server target;
 - `android` — Android framework package compatibility scope;
 - `com.android.systemui`;
 - `com.google.android.apps.nexuslauncher`.
 
-If `system` is missing, use **Request required scope**, approve it in the framework manager, then reboot. Do not judge framework/status-bar geometry until the app reports `system_server=yes` for the installed PixelDenseUI version.
+If `system` is missing, use **Request required scope**, approve it in the framework manager, then reboot.
+
+On Vector/service API 102, the **Runtime diagnostics** section queries `XposedService.getRunningTargets()` directly. After a clean reboot it should list the current module in `system_server`, main SystemUI and Pixel Launcher; the screenshot child appears when that process exists. Do not use remote-preference marker keys as proof of host reachability: injected Vector processes have a read-oriented remote-preference service, while the module-app service provides the authoritative API-102 running-target query.
+
+If the app-service header remains pending for more than a few seconds, record the delay and capture `PixelDenseUI.Settings`, `VectorModuleAppService`, `VectorZygiskBridge`, and ContentProvider/Binder log lines. A delayed module-app service does **not** by itself prove that host hooks failed.
 
 ## 1. Framework/top edge
 
@@ -29,7 +35,7 @@ Use one-variable validation. Start with:
 
 Reboot. Confirm:
 
-- `system_server=yes` in runtime diagnostics;
+- Vector API-102 runtime diagnostics list `system_server` for this module, or Vector verbose logs independently prove the module loaded there;
 - SystemUI remains stable;
 - framework and SystemUI agree on the compact bar height;
 - notification icons, VPN/mute/status icons, mobile data and battery share the intended top baseline;
@@ -47,7 +53,8 @@ Generate enough network traffic to exceed the auto-hide threshold. Confirm:
 - download arrow is bright green and upload arrow bright red;
 - hiding/showing it does not move the clock, notification icons or system icons;
 - VPN/mute/mobile/battery alignment is unchanged while the overlay toggles;
-- rotation/reinflation does not duplicate the overlay.
+- rotation/reinflation does not duplicate the overlay;
+- the SystemUI process contains a `PixelDenseUI-network` worker thread while the overlay controller is active.
 
 ## 3. QS
 
@@ -111,4 +118,4 @@ Validate:
 - screenshot sound suppression and screenshot-child stability;
 - taskbar home, Recents, app launch/return, rotation, keyboard and stash/unstash when taskbar is enabled.
 
-Capture `logcat` filtered by `PixelDenseUI` after each layer. One-time hook installation messages should now appear in normal logcat as well as the Xposed framework log.
+Capture `logcat` filtered by `PixelDenseUI` after each layer. One-time hook installation messages are mirrored to normal logcat as well as the Xposed framework log, but absence from a bounded log buffer is not itself proof that a boot-time hook failed; corroborate with Vector module-load evidence and runtime behaviour.
