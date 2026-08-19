@@ -37,7 +37,6 @@ public final class ModuleMain extends XposedModule {
                     "remote preferences unavailable; fail-closed: skipping system_server hooks");
             return;
         }
-        markRuntime(prefs, "runtime_system_server_version_code", "runtime_system_server_seen_ms");
 
         if (BootLoopProtector.shouldSkip(prefs, "system")) {
             HookUtil.logWarning(this,
@@ -65,16 +64,6 @@ public final class ModuleMain extends XposedModule {
             HookUtil.logWarning(this, "remote preferences unavailable; fail-closed: skipping hooks for "
                     + packageName + " in " + processName);
             return;
-        }
-
-        if ("com.android.systemui".equals(packageName)) {
-            if (processName != null && processName.toLowerCase().contains("screenshot")) {
-                markRuntime(prefs, "runtime_screenshot_version_code", "runtime_screenshot_seen_ms");
-            } else {
-                markRuntime(prefs, "runtime_systemui_version_code", "runtime_systemui_seen_ms");
-            }
-        } else {
-            markRuntime(prefs, "runtime_launcher_version_code", "runtime_launcher_seen_ms");
         }
 
         String guardTarget = guardTarget(packageName, processName);
@@ -109,17 +98,6 @@ public final class ModuleMain extends XposedModule {
         } catch (Throwable t) {
             HookUtil.logWarning(this, "remote preferences unavailable: " + t);
             return null;
-        }
-    }
-
-    private static void markRuntime(SharedPreferences prefs, String versionKey, String timeKey) {
-        try {
-            prefs.edit()
-                    .putInt(versionKey, BuildConfig.VERSION_CODE)
-                    .putLong(timeKey, System.currentTimeMillis())
-                    .apply();
-        } catch (Throwable ignored) {
-            // Diagnostics must never make a host-process hook fatal.
         }
     }
 }
