@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Map;
 
 import dev.pixeldenseui.config.ModuleConfig;
-import io.github.libxposed.service.HookedTarget;
 import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
@@ -204,7 +203,13 @@ public final class SettingsActivity extends Activity {
             addScopeRepair(bound, scope);
 
             section("Runtime diagnostics");
-            content.addView(text(runtimeTargets(bound), 13, false));
+            content.addView(text(
+                    "The connected app service confirms framework/API and approved scope above. "
+                            + "Host-process reachability is verified independently from Vector's "
+                            + "module-load/runtime logs by the maintained validation collector; "
+                            + "PixelDenseUI does not write synthetic runtime markers into Vector "
+                            + "remote preferences from injected host processes.",
+                    13, false));
         }
 
         section("Launcher");
@@ -285,38 +290,6 @@ public final class SettingsActivity extends Activity {
                 + "recreation; reboot is the clean validation boundary.", 13, false));
         content.addView(text("Status-bar ignored-icon selection remains roadmap-only until the "
                 + "Android 16 slot pipeline is validated independently.", 13, false));
-    }
-
-    private String runtimeTargets(XposedService bound) {
-        if (bound == null) return "Runtime target query unavailable: Xposed app service not connected.";
-        int api = safeApi(bound);
-        if (api < XposedService.API_102) {
-            return "Runtime target query requires Xposed service API 102; connected API=" + api
-                    + ". Use Vector/module logs for host reachability on this runtime.";
-        }
-        try {
-            List<HookedTarget> targets = bound.getRunningTargets();
-            if (targets.isEmpty()) {
-                return "Vector API 102 reports no currently running PixelDenseUI hooked targets. "
-                        + "After a clean reboot this indicates scope/injection requires investigation.";
-            }
-            StringBuilder out = new StringBuilder("Vector API 102 currently reports:");
-            for (HookedTarget target : targets) {
-                out.append("\n• ")
-                        .append(target.getProcessName())
-                        .append(" pid=").append(target.getPid())
-                        .append(" uid=").append(target.getUid())
-                        .append(" moduleCode=").append(target.getLoadedVersionCode())
-                        .append(" state=").append(target.getState());
-                if (target.getLoadedVersionCode() == BuildConfig.VERSION_CODE) {
-                    out.append(" [current versionCode]");
-                }
-            }
-            return out.toString();
-        } catch (Throwable t) {
-            Log.w(TAG, "running target query failed", t);
-            return "Vector API 102 running-target query failed: " + t;
-        }
     }
 
     private void addScopeRepair(XposedService bound, List<String> scope) {
