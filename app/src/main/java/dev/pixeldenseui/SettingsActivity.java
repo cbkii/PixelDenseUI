@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 
 import dev.pixeldenseui.config.ModuleConfig;
+import io.github.libxposed.service.HookedTarget;
 import io.github.libxposed.service.XposedService;
 import io.github.libxposed.service.XposedServiceHelper;
 
@@ -81,8 +82,8 @@ public final class SettingsActivity extends Activity {
         status = text(connectionHeader(), 13, false);
         content.addView(status);
 
-        // Render immediately. This avoids a blank "Connecting…" screen when Vector's
-        // ContentProvider-based module-app service delivery is delayed.
+        // Render immediately. Vector's module-app Xposed service arrives through a
+        // ContentProvider IPC path and can be delayed independently of the Activity UI.
         renderSettings(null, List.of(), false);
 
         Log.i(TAG, "SettingsActivity created; waiting for Xposed app service");
@@ -203,13 +204,7 @@ public final class SettingsActivity extends Activity {
             addScopeRepair(bound, scope);
 
             section("Runtime diagnostics");
-            content.addView(text("This build has reached: "
-                    + runtimeState("system_server", "runtime_system_server_version_code") + ", "
-                    + runtimeState("SystemUI", "runtime_systemui_version_code") + ", "
-                    + runtimeState("screenshot", "runtime_screenshot_version_code") + ", "
-                    + runtimeState("Launcher", "runtime_launcher_version_code") + ".", 13, false));
-            content.addView(text("A missing system_server marker after reboot usually means the "
-                    + "modern `system` scope is not active.", 13, false));
+            content.addView(text(runtimeTargets(bound), 13, false));
         }
 
         section("Launcher");
@@ -292,6 +287,38 @@ public final class SettingsActivity extends Activity {
                 + "Android 16 slot pipeline is validated independently.", 13, false));
     }
 
+    private String runtimeTargets(XposedService bound) {
+        if (bound == null) return "Runtime target query unavailable: Xposed app service not connected.";
+        int api = safeApi(bound);
+        if (api < XposedService.API_102) {
+            return "Runtime target query requires Xposed service API 102; connected API=" + api
+                    + ". Use Vector/module logs for host reachability on this runtime.";
+        }
+        try {
+            List<HookedTarget> targets = bound.getRunningTargets();
+            if (targets.isEmpty()) {
+                return "Vector API 102 reports no currently running PixelDenseUI hooked targets. "
+                        + "After a clean reboot this indicates scope/injection requires investigation.";
+            }
+            StringBuilder out = new StringBuilder("Vector API 102 currently reports:");
+            for (HookedTarget target : targets) {
+                out.append("\n• ")
+                        .append(target.getProcessName())
+                        .append(" pid=").append(target.getPid())
+                        .append(" uid=").append(target.getUid())
+                        .append(" moduleCode=").append(target.getLoadedVersionCode())
+                        .append(" state=").append(target.getState());
+                if (target.getLoadedVersionCode() == BuildConfig.VERSION_CODE) {
+                    out.append(" [current versionCode]");
+                }
+            }
+            return out.toString();
+        } catch (Throwable t) {
+            Log.w(TAG, "running target query failed", t);
+            return "Vector API 102 running-target query failed: " + t;
+        }
+    }
+
     private void addScopeRepair(XposedService bound, List<String> scope) {
         if (bound == null) return;
         ArrayList<String> missing = new ArrayList<>();
@@ -342,12 +369,6 @@ public final class SettingsActivity extends Activity {
         }
     }
 
-    private String runtimeState(String label, String key) {
-        if (prefs == null) return label + "=unavailable";
-        int version = prefs.getInt(key, -1);
-        return label + "=" + (version == BuildConfig.VERSION_CODE ? "yes" : "not seen");
-    }
-
     private void section(String name) {
         TextView v = text(name, 18, true);
         v.setPadding(0, dp(18), 0, dp(6));
@@ -359,7 +380,7 @@ public final class SettingsActivity extends Activity {
         SharedPreferences source = displayPreferences();
         Switch sw = new Switch(this);
         sw.setText(label);
-        sw.setChecked(source != null && source.getBoolean(key, def));
+        sw.setChecked(source == null ? def : source.getBoolean(key, def));
         sw.setEnabled(controlsWritable());
         sw.setOnCheckedChangeListener((button, checked) -> {
             if (prefs == null) return;
