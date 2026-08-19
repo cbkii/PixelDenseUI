@@ -10,7 +10,7 @@ Record the build and framework state:
 su -c 'getprop ro.build.fingerprint; getprop ro.build.version.incremental'
 ```
 
-Pixel Dense UI now renders its settings immediately even if Vector has not yet delivered the module-app Xposed service. Until that service arrives, controls are deliberately **read-only** and show last-known/default values; PixelDenseUI does not write a second local configuration because host processes consume Vector remote preferences.
+Pixel Dense UI renders its settings immediately even if Vector has not yet delivered the module-app Xposed service. Until that service arrives, controls are deliberately **read-only** and show last-known/default values; PixelDenseUI does not write a second local configuration because host processes consume Vector remote preferences.
 
 When the service connects, confirm the header reports the current build and all four required scopes:
 
@@ -21,7 +21,7 @@ When the service connects, confirm the header reports the current build and all 
 
 If `system` is missing, use **Request required scope**, approve it in the framework manager, then reboot.
 
-On Vector/service API 102, the **Runtime diagnostics** section queries `XposedService.getRunningTargets()` directly. After a clean reboot it should list the current module in `system_server`, main SystemUI and Pixel Launcher; the screenshot child appears when that process exists. Do not use remote-preference marker keys as proof of host reachability: injected Vector processes have a read-oriented remote-preference service, while the module-app service provides the authoritative API-102 running-target query.
+Host-process reachability is verified independently using Vector module-load/runtime logs and process evidence. Do **not** use PixelDenseUI remote-preference `runtime_*` marker keys as proof: Vector's injected-process preference service is read-oriented, so injected hosts should not be used to persist diagnostic markers back into the module preference database.
 
 If the app-service header remains pending for more than a few seconds, record the delay and capture `PixelDenseUI.Settings`, `VectorModuleAppService`, `VectorZygiskBridge`, and ContentProvider/Binder log lines. A delayed module-app service does **not** by itself prove that host hooks failed.
 
@@ -35,7 +35,7 @@ Use one-variable validation. Start with:
 
 Reboot. Confirm:
 
-- Vector API-102 runtime diagnostics list `system_server` for this module, or Vector verbose logs independently prove the module loaded there;
+- Vector verbose/module-load evidence shows PixelDenseUI loaded in `system_server`;
 - SystemUI remains stable;
 - framework and SystemUI agree on the compact bar height;
 - notification icons, VPN/mute/status icons, mobile data and battery share the intended top baseline;
