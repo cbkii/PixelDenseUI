@@ -93,11 +93,11 @@ main() {
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'targetApiVersion=101'
 
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'requestScope(missing'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'getRunningTargets()'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'XposedService.API_102'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'controls below remain read-only'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'PixelDenseUI.Settings'
-    require_text "$ROOT_DIR/app/build.gradle.kts" 'io.github.libxposed:service:102.0.0'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'settings_ui_cache'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'getRunningTargets()'
+    require_text "$ROOT_DIR/app/build.gradle.kts" 'io.github.libxposed:service:101.0.0'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'fail-closed: skipping system_server hooks'
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'runtime_system_server_version_code'
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'markRuntime('
@@ -174,7 +174,7 @@ main() {
     printf 'ERRORS:       %d\n' "$errors"
     printf 'JAVA SOURCES: %s\n' "$java_count"
     printf 'SCOPES:       system, android, SystemUI, Pixel Launcher\n'
-    printf 'LIBXPOSED:    hooks API 101; app diagnostics API 102\n'
+    printf 'LIBXPOSED:    API 101\n'
     printf 'NOTIFICATIONS: off/silent/all; no hot-layout traversal\n'
     printf 'TRAFFIC:      cellular overlay + background sampler\n'
     printf 'SETTINGS:     immediate read-only UI while app service is pending\n'
