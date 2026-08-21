@@ -58,7 +58,6 @@ main() {
         app/src/main/java/dev/pixeldenseui/ModuleMain.java \
         app/src/main/java/dev/pixeldenseui/SettingsActivity.java \
         app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java \
-        app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java \
         app/src/main/java/dev/pixeldenseui/hooks/FrameworkStatusBarHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java \
         app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java \
@@ -102,6 +101,7 @@ main() {
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'fail-closed: skipping system_server hooks'
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'runtime_system_server_version_code'
     reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'markRuntime('
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'BootLoopProtector'
     require_text "$ROOT_DIR/app/build.gradle.kts" 'SOURCE_REVISION'
 
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'NOTIFICATION_MODE_OFF = 0'
@@ -135,7 +135,7 @@ main() {
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NetworkTrafficController.java" 'UPLOAD_COLOR'
 
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
+    require_absent 'app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_density_percent", 50)'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns", 8)'
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_tile_height_percent", 100)'
@@ -184,6 +184,7 @@ main() {
     printf 'NOTIFICATIONS: off/silent/all; no hot-layout traversal\n'
     printf 'TRAFFIC:      cellular overlay + background sampler\n'
     printf 'SETTINGS:     immediate read-only UI while app service is pending\n'
+    printf 'RESTART GUARD: framework-native only; injected remote state is read-only\n'
     printf 'CUTOUT MODE:  retain; clamp opt-in\n'
     printf '==================================================\n'
 
