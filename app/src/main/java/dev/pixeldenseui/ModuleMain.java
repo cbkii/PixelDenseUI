@@ -10,7 +10,6 @@ import dev.pixeldenseui.hooks.FrameworkStatusBarHooks;
 import dev.pixeldenseui.hooks.HookUtil;
 import dev.pixeldenseui.hooks.LauncherHooks;
 import dev.pixeldenseui.hooks.SystemUiHooks;
-import dev.pixeldenseui.safety.BootLoopProtector;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
@@ -32,8 +31,9 @@ public final class ModuleMain extends XposedModule {
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
         SharedPreferences prefs = preferencesOrNull();
-        if (BootLoopProtector.shouldSkip(prefs, "android")) {
-            HookUtil.logWarning(this, "bootloop guard: skipping android/system_server hooks for this restart window");
+        if (prefs == null) {
+            HookUtil.logWarning(this,
+                    "remote preferences unavailable; fail-closed: skipping system_server hooks");
             return;
         }
 
@@ -53,10 +53,9 @@ public final class ModuleMain extends XposedModule {
         }
 
         SharedPreferences prefs = preferencesOrNull();
-        String guardTarget = guardTarget(packageName, processName);
-        if (BootLoopProtector.shouldSkip(prefs, guardTarget)) {
-            HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + guardTarget
-                    + " in this restart window");
+        if (prefs == null) {
+            HookUtil.logWarning(this, "remote preferences unavailable; fail-closed: skipping hooks for "
+                    + packageName + " in " + processName);
             return;
         }
 
@@ -72,18 +71,11 @@ public final class ModuleMain extends XposedModule {
         }
     }
 
-    private static String guardTarget(String packageName, String processName) {
-        if (processName == null || processName.isBlank() || processName.equals(packageName)) {
-            return packageName;
-        }
-        return packageName + "@" + processName;
-    }
-
     private SharedPreferences preferencesOrNull() {
         try {
             return getRemotePreferences(ModuleConfig.PREF_FILE);
         } catch (Throwable t) {
-            HookUtil.logWarning(this, "remote preferences unavailable; using built-in defaults: " + t);
+            HookUtil.logWarning(this, "remote preferences unavailable: " + t);
             return null;
         }
     }

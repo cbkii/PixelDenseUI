@@ -44,14 +44,20 @@ require_text() {
     if grep -Fq -- "$expected" "$file" 2>/dev/null; then pass; else fail "Expected text '$expected' not found in ${file#$ROOT_DIR/}"; fi
 }
 
+reject_text() {
+    local file=${1:-}
+    local rejected=${2:-}
+    if grep -Fq -- "$rejected" "$file" 2>/dev/null; then fail "Rejected text '$rejected' found in ${file#$ROOT_DIR/}"; else pass; fi
+}
+
 main() {
     local rel
     local java_count
 
     for rel in \
         app/src/main/java/dev/pixeldenseui/ModuleMain.java \
+        app/src/main/java/dev/pixeldenseui/SettingsActivity.java \
         app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java \
-        app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java \
         app/src/main/java/dev/pixeldenseui/hooks/FrameworkStatusBarHooks.java \
         app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java \
         app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java \
@@ -63,23 +69,83 @@ main() {
         app/src/main/resources/META-INF/xposed/java_init.list \
         app/src/main/resources/META-INF/xposed/module.prop \
         app/src/main/resources/META-INF/xposed/scope.list \
+        app/src/test/java/dev/pixeldenseui/config/ModuleConfigTest.java \
         .github/workflows/build.yml \
         .github/workflows/release.yml \
         LICENSE \
         docs/UPSTREAM.md \
         docs/APK_EVIDENCE.md \
+        docs/DEVICE_HOOK_MAP.md \
         docs/ROADMAP.md \
+        docs/RRO_EVALUATION.md \
         docs/STATUS_BAR_INSET_POLICY.md \
+        docs/VALIDATION.md \
         NOTICE.md; do
         require_file "$rel"
     done
 
+    require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/scope.list" 'system'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/scope.list" 'android'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/scope.list" 'com.android.systemui'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/scope.list" 'com.google.android.apps.nexuslauncher'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'minApiVersion=101'
     require_exact_line "$ROOT_DIR/app/src/main/resources/META-INF/xposed/module.prop" 'targetApiVersion=101'
 
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'requestScope(missing'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'controls below remain read-only'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'PixelDenseUI.Settings'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'settings_ui_cache'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'if (service != dead) return;'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/SettingsActivity.java" 'getRunningTargets()'
+    require_text "$ROOT_DIR/app/build.gradle.kts" 'io.github.libxposed:service:101.0.0'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'fail-closed: skipping system_server hooks'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'runtime_system_server_version_code'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'markRuntime('
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/ModuleMain.java" 'BootLoopProtector'
+    require_text "$ROOT_DIR/app/build.gradle.kts" 'SOURCE_REVISION'
+
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'NOTIFICATION_MODE_OFF = 0'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("notification_mode", NOTIFICATION_MODE_OFF)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiHooks.java" 'notification hooks not installed: mode Off'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiHooks.java" 'toLowerCase(Locale.ROOT)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'setContractedChild'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'onNotificationUpdated'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'android.contains.customView'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'supportedStandardStyle'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'template == null && notification.contentView != null'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'scaleIconsRecursive'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'setScaleX('
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" 'setScaleY('
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" '"onLayout"'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" '"updateLimits"'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" '"getCollapsedHeight"'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NotificationHooks.java" '"getMinHeight"'
+
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'notification_min_height'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'notification_icon_size'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'Collections.synchronizedMap(new WeakHashMap<>())'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'resourceKeyCache.get(resources)'
+
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'StatusIconContainer'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'NotificationIconContainer'
+    reject_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'forceTopGravity'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NetworkTrafficController.java" 'newSingleThreadScheduledExecutor'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NetworkTrafficController.java" '0x80000000'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NetworkTrafficController.java" 'DOWNLOAD_COLOR'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/NetworkTrafficController.java" 'UPLOAD_COLOR'
+
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
+    require_absent 'app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_density_percent", 50)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns", 8)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_tile_height_percent", 100)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns_landscape", 12)'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("clock_position", 1), 0, 3'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'common_tile_default_tile_height'
+    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getBoolean("clamp_cutout_safe_inset", false)'
+    require_text "$ROOT_DIR/docs/RRO_EVALUATION.md" 'will **not** replace or patch `SystemUIGoogle.apk`'
+
+    # Preserve the established release trust boundary while extending runtime checks.
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'workflow_dispatch:'
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'environment: release'
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}'
@@ -90,17 +156,6 @@ main() {
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'chore(release): prepare ${RELEASE_TAG}'
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'git push --force-with-lease='
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'verify --verbose --print-certs'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/HookUtil.java" 'cls.getDeclaredMethods()'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/safety/BootLoopProtector.java" 'RESET_WINDOW_MS = 60_000L'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_density_percent", 50)'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns", 8)'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_tile_height_percent", 100)'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("qs_columns_landscape", 12)'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("clock_position", 1), 0, 3'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/SystemUiResourceHooks.java" 'common_tile_default_tile_height'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/hooks/StatusBarHooks.java" 'Gravity.TOP | Gravity.CENTER_HORIZONTAL'
-    require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getInt("keyguard_wallpaper_dim_percent", 66)'
-    require_text "$ROOT_DIR/docs/ROADMAP.md" 'Status-bar ignored icons'
 
     require_absent 'ReleaseKey.jks'
     require_absent 'keystore.properties'
@@ -139,11 +194,14 @@ main() {
     printf 'CHECKS:       %d\n' "$checks"
     printf 'ERRORS:       %d\n' "$errors"
     printf 'JAVA SOURCES: %s\n' "$java_count"
-    printf 'SCOPES:       android, SystemUI, Pixel Launcher\n'
+    printf 'SCOPES:       system, android, SystemUI, Pixel Launcher\n'
     printf 'LIBXPOSED:    API 101\n'
-    printf 'CUTOUT MODE:  retain + clamp (no removal)\n'
+    printf 'NOTIFICATIONS: off/silent/all; no hot-layout traversal\n'
+    printf 'TRAFFIC:      cellular overlay + background sampler\n'
+    printf 'SETTINGS:     immediate read-only UI while app service is pending\n'
+    printf 'RESTART GUARD: framework-native only; injected remote state is read-only\n'
     printf 'RELEASE:      workflow_dispatch + auto-version + signed APK\n'
-    printf 'FEATURE SET:  QS profile + statusbar + lockscreen + screenshot\n'
+    printf 'CUTOUT MODE:  retain; clamp opt-in\n'
     printf '==================================================\n'
 
     ((errors == 0))

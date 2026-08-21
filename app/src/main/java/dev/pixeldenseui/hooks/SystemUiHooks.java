@@ -3,6 +3,8 @@
  */
 package dev.pixeldenseui.hooks;
 
+import java.util.Locale;
+
 import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
@@ -20,23 +22,24 @@ public final class SystemUiHooks {
     }
 
     public void install() {
-        // Screenshot code lives in a short-lived SystemUI child process. Keep it isolated
-        // so broad MediaPlayer/coroutine fallbacks can never affect the main SystemUI process.
-        if (processName.toLowerCase().contains("screenshot")) {
+        if (processName.toLowerCase(Locale.ROOT).contains("screenshot")) {
             HookUtil.installSafely(module, "screenshot sound hooks",
                     () -> new ScreenshotHooks(module, cl, config).install());
             return;
         }
 
-        // PixelXpert loads mod packs independently: one drifted hook family should not
-        // prevent unrelated SystemUI features from loading.
-        HookUtil.installSafely(module, "SystemUI resource density hooks",
+        HookUtil.installSafely(module, "SystemUI resource hooks",
                 () -> new SystemUiResourceHooks(module, cl, config).install());
         HookUtil.installSafely(module, "status-bar view hooks",
                 () -> new StatusBarHooks(module, cl, config).install());
         HookUtil.installSafely(module, "lockscreen visual hooks",
                 () -> new LockscreenHooks(module, cl, config).install());
-        HookUtil.installSafely(module, "notification density hooks",
-                () -> new NotificationHooks(module, cl, config).install());
+
+        if (config.notificationMode() == ModuleConfig.NOTIFICATION_MODE_OFF) {
+            HookUtil.log(module, "notification hooks not installed: mode Off");
+        } else {
+            HookUtil.installSafely(module, "notification hooks",
+                    () -> new NotificationHooks(module, cl, config).install());
+        }
     }
 }

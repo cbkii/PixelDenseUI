@@ -183,15 +183,23 @@ public final class HookUtil {
         }
     }
 
+    /**
+     * Mirror one-time module diagnostics into ordinary Android logging as well as
+     * the framework's module log. This makes hook-install state visible in logcat
+     * on runtimes that do not forward module.log() records there.
+     */
     public static void log(XposedModule module, String msg) {
-        try { module.log(Log.INFO, TAG, msg); } catch (Throwable ignored) { Log.d(TAG, msg); }
+        try { module.log(Log.INFO, TAG, msg); } catch (Throwable ignored) {}
+        try { Log.i(TAG, msg); } catch (Throwable ignored) {}
     }
 
     public static void logWarning(XposedModule module, String msg) {
-        try { module.log(Log.WARN, TAG, msg); } catch (Throwable ignored) { Log.w(TAG, msg); }
+        try { module.log(Log.WARN, TAG, msg); } catch (Throwable ignored) {}
+        try { Log.w(TAG, msg); } catch (Throwable ignored) {}
     }
 
     public static void logError(XposedModule module, String msg, Throwable t) {
-        try { module.log(Log.ERROR, TAG, msg, t); } catch (Throwable ignored) { Log.e(TAG, msg, t); }
+        try { module.log(Log.ERROR, TAG, msg, t); } catch (Throwable ignored) {}
+        try { Log.e(TAG, msg, t); } catch (Throwable ignored) {}
     }
 }

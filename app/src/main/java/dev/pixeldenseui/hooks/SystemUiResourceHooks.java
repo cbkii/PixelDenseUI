@@ -9,12 +9,26 @@ package dev.pixeldenseui.hooks;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 
+import java.util.Collections;
+import java.util.Map;
+import java.util.WeakHashMap;
+import java.util.concurrent.ConcurrentHashMap;
+
 import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
 public final class SystemUiResourceHooks {
     private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
     private static final String ANDROID_PACKAGE = "android";
+
+    /**
+     * Resource IDs are only unique inside one resource table. SystemUI can call these
+     * process-wide Resources hooks through multiple package/configuration tables, so an
+     * ID-only cache can reuse a name from the wrong table. Keep a weak per-Resources
+     * cache to avoid both cross-table aliasing and retaining obsolete configurations.
+     */
+    private final Map<Resources, Map<Integer, ResourceKey>> resourceKeyCache =
+            Collections.synchronizedMap(new WeakHashMap<>());
 
     private final XposedModule module;
     private final ClassLoader cl;
@@ -30,7 +44,8 @@ public final class SystemUiResourceHooks {
         hookComposeQsRepositories();
         hookIntegers();
         hookDimensions();
-        HookUtil.log(module, "SystemUI resource density hooks installed");
+        HookUtil.log(module,
+                "SystemUI resource hooks installed (QS/status bar only; notifications excluded)");
     }
 
     private void hookComposeQsRepositories() {
@@ -54,8 +69,9 @@ public final class SystemUiResourceHooks {
                     for (int i = 0; i < args.length; i++) {
                         if (!(args[i] instanceof Resources base)) continue;
                         args[i] = new FakeIntegerResource(base, (resources, id) -> {
-                            if (!SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(resources, id))
-                                    || !resourceName.equals(HookUtil.resourceEntryName(resources, id))) {
+                            ResourceKey key = resourceKey(resources, id);
+                            if (!SYSTEMUI_PACKAGE.equals(key.pkg())
+                                    || !resourceName.equals(key.name())) {
                                 return null;
                             }
                             int value = replacement.value(resources);
@@ -77,18 +93,16 @@ public final class SystemUiResourceHooks {
             module.hook(method).intercept(chain -> {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
-                if (!SYSTEMUI_PACKAGE.equals(HookUtil.resourcePackageName(res, id))) {
+                ResourceKey key = resourceKey(res, id);
+                if (!SYSTEMUI_PACKAGE.equals(key.pkg())) {
                     return chain.proceed();
                 }
 
-                String name = HookUtil.resourceEntryName(res, id);
                 boolean landscape = isLandscape(res);
                 int rows = landscape ? config.qsRowsLandscape() : config.qsRows();
                 int cols = landscape ? config.qsColumnsLandscape() : config.qsColumns();
 
-                return switch (name) {
-                    // Global name-filtered fallback for the Compose TileGrid path. A
-                    // landscape value of 0 deliberately preserves SystemUI's row count.
+                return switch (key.name()) {
                     case "quick_settings_paginated_grid_num_rows" ->
                             rows > 0 ? rows : chain.proceed();
                     case "quick_settings_min_num_tiles" -> {
@@ -111,47 +125,55 @@ public final class SystemUiResourceHooks {
             module.hook(method).intercept(chain -> {
                 Resources res = (Resources) chain.getThisObject();
                 int id = (Integer) chain.getArg(0);
-                String name = HookUtil.resourceEntryName(res, id);
-                String pkg = HookUtil.resourcePackageName(res, id);
                 int original = (Integer) chain.proceed();
+                ResourceKey key = resourceKey(res, id);
 
-                if (config.topEdgeStatusBar() && isSystemBarResourcePackage(pkg)) {
-                    if ("status_bar_height".equals(name)) {
+                if (config.topEdgeStatusBar() && isSystemBarResourcePackage(key.pkg())) {
+                    if ("status_bar_height".equals(key.name())) {
                         return scale(original, config.statusBarHeightPercent(), 1);
                     }
-                    if ("status_bar_padding_top".equals(name)
-                            || "status_bar_icons_padding_top".equals(name)
-                            || "status_bar_icons_padding_bottom".equals(name)) {
-                        // The configured top distance is now applied once at
-                        // status_bar_contents. Returning it from these nested resources
-                        // stacked the offset differently for clock/icons/battery.
+                    if ("status_bar_padding_top".equals(key.name())
+                            || "status_bar_icons_padding_top".equals(key.name())
+                            || "status_bar_icons_padding_bottom".equals(key.name())) {
                         return 0;
                     }
-                    if ("status_bar_system_icon_spacing".equals(name)
-                            || "status_bar_icon_horizontal_margin".equals(name)) {
+                    if ("status_bar_system_icon_spacing".equals(key.name())
+                            || "status_bar_icon_horizontal_margin".equals(key.name())) {
                         return HookUtil.dp(res, config.statusBarIconSpacingDp());
                     }
                 }
 
-                if (!SYSTEMUI_PACKAGE.equals(pkg)) return original;
+                if (!SYSTEMUI_PACKAGE.equals(key.pkg())) return original;
 
-                if (isQsTileHeightDimen(name)) {
+                if (isQsTileHeightDimen(key.name())) {
                     return scale(original, config.qsTileHeightPercent(), HookUtil.dp(res, 24));
                 }
-                if (isQsDensityDimen(name)) {
+                if (isQsDensityDimen(key.name())) {
                     return scale(original, config.qsDensityPercent(), 1);
                 }
-                if (isNotificationDensityDimen(name)) {
-                    return scale(original, config.notificationDensityPercent(), HookUtil.dp(res, 1));
-                }
-                if (isNotificationIconDimen(name)) {
-                    return scale(original, config.notificationIconPercent(), HookUtil.dp(res, 12));
-                }
+
+                // Deliberately no notification resource scaling here. Notification rows are
+                // handled at stable contracted-content lifecycle points so mode Off is stock and
+                // silent-only mode can be selected per row without a process-wide dimension hook.
                 return original;
             });
         } catch (Throwable t) {
             HookUtil.logError(module, "Resources#getDimensionPixelSize hook failed", t);
         }
+    }
+
+    private ResourceKey resourceKey(Resources resources, int id) {
+        Map<Integer, ResourceKey> perResources;
+        synchronized (resourceKeyCache) {
+            perResources = resourceKeyCache.get(resources);
+            if (perResources == null) {
+                perResources = new ConcurrentHashMap<>();
+                resourceKeyCache.put(resources, perResources);
+            }
+        }
+        return perResources.computeIfAbsent(id, ignored -> new ResourceKey(
+                HookUtil.resourcePackageName(resources, id),
+                HookUtil.resourceEntryName(resources, id)));
     }
 
     private static boolean isLandscape(Resources resources) {
@@ -163,9 +185,6 @@ public final class SystemUiResourceHooks {
     }
 
     private static boolean isQsTileHeightDimen(String n) {
-        // Present in the target Android 16 SystemUI APK and used by the Compose
-        // common-tile path. Keep this deliberately narrower than the general
-        // density setting so vertical size can be tuned independently.
         return "common_tile_default_tile_height".equals(n);
     }
 
@@ -186,46 +205,6 @@ public final class SystemUiResourceHooks {
         };
     }
 
-    private static boolean isNotificationDensityDimen(String n) {
-        return switch (n) {
-            case "notification_min_height",
-                 "notification_2025_min_height",
-                 "notification_content_min_height",
-                 "notification_min_height_increased",
-                 "notification_min_height_legacy",
-                 "notification_min_height_legacy_large",
-                 "notification_section_header_height",
-                 "notification_section_divider_height",
-                 "notification_minimum_spacing_between_children",
-                 "notification_children_collapsed_bottom_padding",
-                 "notification_children_container_divider_height",
-                 "notification_children_padding",
-                 "notification_2025_header_height",
-                 "notification_2025_header_top_padding",
-                 "notification_2025_text_top_padding",
-                 "notification_bundle_header_height",
-                 "notification_header_padding_top",
-                 "notification_one_line_vertical_padding",
-                 "notification_content_margin_start",
-                 "notification_main_column_right_margin" -> true;
-            default -> false;
-        };
-    }
-
-    private static boolean isNotificationIconDimen(String n) {
-        return n.equals("notification_icon_area")
-                || n.equals("notification_icon_appearance_padding")
-                || n.equals("notification_icon_circle_size")
-                || n.equals("notification_icon_size")
-                || n.equals("notification_icon_size_h")
-                || n.equals("notification_icon_size_l")
-                || n.equals("notification_icon_size_xl")
-                || n.equals("notification_icon_size_xs")
-                || n.equals("notification_icon_size_xxl")
-                || n.equals("notification_2025_conversation_icon_size")
-                || n.equals("notification_2025_requests_icon_size");
-    }
-
     private static int scale(int px, int percent, int floorPx) {
         return Math.max(floorPx, Math.round(px * percent / 100f));
     }
@@ -233,4 +212,6 @@ public final class SystemUiResourceHooks {
     private interface IntReplacement {
         int value(Resources resources);
     }
+
+    private record ResourceKey(String pkg, String name) {}
 }

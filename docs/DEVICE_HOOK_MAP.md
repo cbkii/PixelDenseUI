@@ -1,60 +1,61 @@
 # Device hook map
 
-Source of truth for v0.1: the user-supplied Pixel SystemUI Android 16 APK.
+Source of truth remains the supplied/current Pixel 9a Android 16 SystemUI evidence plus physical v0.1.x validation. Every private target is fail-soft and build-sensitive.
+
+## Framework / system_server
+
+Required modern libxposed scope: `system`.
+
+- `com.android.internal.policy.SystemBarUtils`
+  - `getStatusBarHeight`
+  - `getStatusBarHeightForRotation`
+- `com.android.server.wm.utils.WmDisplayCutout`
+  - `getDisplayCutout` (only when cutout clamp is enabled)
 
 ## Status bar
 
-Observed:
 - `com.android.systemui.statusbar.phone.PhoneStatusBarView`
-  - `onApplyWindowInsets`
-  - `updateCutoutLocation`
-  - `updateSafeInsets`
   - `updateStatusBarHeight`
-  - `updateWindowHeight`
-- `com.android.systemui.statusbar.policy.Clock`
-- `com.android.systemui.statusbar.phone.ui.StatusBarIconControllerImpl`
-- `com.android.systemui.statusbar.phone.PhoneStatusBarViewController`
+  - `onApplyWindowInsets`
+  - `onFinishInflate`
+- `com.android.systemui.statusbar.phone.PhoneStatusBarViewController#onViewAttached`
+- `com.android.systemui.statusbar.policy.Clock#getSmallTime`
+- `com.android.systemui.statusbar.phone.StatusIconContainer#onLayout`
+- `com.android.systemui.statusbar.phone.NotificationIconContainer#onLayout`
+- `com.android.systemui.statusbar.StatusBarIconView#onDraw`
 
-Observed resources include:
-`status_bar_height`, `status_bar_padding_top`,
-`status_bar_icons_padding_top`, `status_bar_icons_padding_bottom`,
-`status_bar_system_icon_spacing`, `status_bar_icon_horizontal_margin`,
-`status_bar_clock_size`, `status_bar_left_clock_*`.
+The two icon containers own vertical child placement and centre their children in stock Android 16. PixelDenseUI therefore aligns these exact containers after stock layout rather than recursively rewriting arbitrary descendants. `StatusBarIconView` draw compensation is applied only to children observed in those containers.
+
+The network monitor is attached as a PhoneStatusBarView overlay and anchored to exact/slot-derived cellular/mobile views when available; it is not a start-side sibling.
 
 ## Android 16 Compose QS
 
-Observed:
-- `com.android.systemui.qs.panels.ui.compose.PaginatedGridLayout`
 - `com.android.systemui.qs.panels.data.repository.QSColumnsRepository`
 - `com.android.systemui.qs.panels.data.repository.QuickQuickSettingsRowRepository`
-
-Observed resource keys:
-- `quick_settings_paginated_grid_num_rows`
-- `quick_qs_paginated_grid_num_rows`
-- `quick_settings_infinite_grid_num_columns`
-- `quick_settings_min_num_tiles`
-- QS margins/padding.
-
-These match the current PixelXpert canary strategy.
+- targeted integer/dimension resource fallback for current QS names, including `common_tile_default_tile_height`.
 
 ## Notifications
 
-Observed:
-- `com.android.systemui.statusbar.notification.row.ExpandableNotificationRow`
+Current low-overhead targets:
+
 - `com.android.systemui.statusbar.notification.row.NotificationContentView`
-- `com.android.systemui.statusbar.notification.stack.NotificationChildrenContainer`
+  - `setContractedChild`
+  - `onNotificationUpdated`
+  - `setIsChildInGroup`
+  - `setHeadsUp`
 
-Observed row APIs include:
-- `getCollapsedHeight`
-- `getMinHeight`
-- `getIntrinsicHeight`
-- `updateLimits`
-- `showingAsLowPriority`
+Deliberately **not hooked** anymore:
 
-v0.1 prefers SystemUI/platform-owned classification: the notification's explicit `isSilent()` state when available, then the entry's notification-section bucket, with `showingAsLowPriority()` as the grouped-notification fallback. It does **not** infer silence from an arbitrary importance threshold.
+- `ExpandableNotificationRow.getCollapsedHeight/getMinHeight`;
+- `NotificationContentView.getMinHeight/getMinContentHeightHint`;
+- notification `onLayout`/`updateLimits` hot paths;
+- recursive icon-tree traversal;
+- process-wide PixelDenseUI notification dimension/icon resource scaling.
+
+Silent classification remains platform-state based: explicit notification silent state when available, section bucket, then low-priority grouped fallback. Classification is cached per row and invalidated on notification update.
+
+Only exact contracted icon IDs are considered. Group children and special layouts remain stock until independently validated.
 
 ## Fail-open rule
 
-Every build-sensitive class/method is looked up dynamically. Missing targets are skipped and logged instead of aborting SystemUI.
-
-See `APK_EVIDENCE.md` for the source APK hash and reproducible symbol/resource evidence.
+Missing private targets disable only that feature path. Remote-preference service unavailability is different: host hook startup fails closed rather than applying potentially wrong geometry defaults.
