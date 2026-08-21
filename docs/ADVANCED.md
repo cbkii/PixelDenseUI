@@ -33,7 +33,7 @@ TrafficStats/connectivity sampling and string calculation run on a dedicated dae
 
 ## Quick Settings
 
-Android 16 Compose QS remains implemented with narrowly filtered repository/resource interception. Resource ID -> package/name classification is cached to reduce the residual cost of the process-wide `Resources` hook.
+Android 16 Compose QS remains implemented with narrowly filtered repository/resource interception. Resource ID -> package/name classification is cached per `Resources` table so equal numeric IDs from different package/configuration tables cannot alias each other.
 
 ## Notifications
 
@@ -47,7 +47,7 @@ The replacement has three process-creation modes:
 
 It hooks stable `NotificationContentView` content/update/state methods instead of measurement/layout loops. Stock contracted geometry is captured once, a real target layout height/icon size is applied, and original geometry is restorable. Generic `contains("icon")` matching and `scaleX/scaleY` are gone.
 
-Grouped children, HUN, media, calls, messaging/conversation styles, progress and unknown/custom contracted layouts remain stock. This is conservative by design; each can be added only after current-target mapping and physical validation.
+Grouped children, HUN, media, calls, messaging/conversation styles, progress and explicitly custom or unknown style layouts remain stock. Plain/legacy notifications without `EXTRA_TEMPLATE` are not treated as custom merely because they expose a `contentView`.
 
 PixelDenseUI notification dimensions are no longer handled by `SystemUiResourceHooks`, avoiding resource + view double scaling.
 
@@ -57,9 +57,9 @@ A patched/re-signed privileged `SystemUIGoogle.apk` is intentionally rejected. A
 
 ## Runtime diagnostics
 
-The app records current-build reachability markers for system_server, main SystemUI, screenshot and Launcher in the module's remote preferences. These markers are diagnostic only and cannot make a host-process hook fatal. Build source identity is exposed through `BuildConfig.SOURCE_REVISION`.
+The settings app reports build/source identity plus the connected module-app framework/API and approved scope. It does **not** synthesize host reachability by writing `runtime_*` keys from injected processes; Vector's injected-host preference service is read-oriented.
 
-Hook installation logs are sent both through the Xposed module logger and Android logcat (`PixelDenseUI`) to make “module loaded” versus “feature hook installed/skipped” distinguishable during field testing.
+Host-process reachability is established independently from Vector module-load/runtime logs, process evidence and the maintained validation collector. Hook installation logs are sent both through the Xposed module logger and Android logcat (`PixelDenseUI`) to make “module loaded” versus “feature hook installed/skipped” distinguishable during field testing.
 
 ## OTA / recovery model
 
