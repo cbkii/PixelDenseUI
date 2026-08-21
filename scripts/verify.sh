@@ -145,9 +145,16 @@ main() {
     require_text "$ROOT_DIR/app/src/main/java/dev/pixeldenseui/config/ModuleConfig.java" 'getBoolean("clamp_cutout_safe_inset", false)'
     require_text "$ROOT_DIR/docs/RRO_EVALUATION.md" 'will **not** replace or patch `SystemUIGoogle.apk`'
 
+    # Preserve the established release trust boundary while extending runtime checks.
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'workflow_dispatch:'
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'environment: release'
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'KEY_ALIAS: ${{ secrets.KEY_ALIAS }}'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'target_code=$((source_code + 1))'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'chore(release): prepare ${RELEASE_TAG}'
+    require_text "$ROOT_DIR/.github/workflows/release.yml" 'git push --force-with-lease='
     require_text "$ROOT_DIR/.github/workflows/release.yml" 'verify --verbose --print-certs'
 
     require_absent 'ReleaseKey.jks'
@@ -163,6 +170,14 @@ main() {
     if grep -R --line-number -E '(KEYSTORE_BASE64|KEYSTORE_PASSWORD|KEY_ALIAS|KEY_PASSWORD)[[:space:]]*=[[:space:]]*[^$<{[:space:]]+' \
         "$ROOT_DIR" --exclude-dir=.git --exclude='verify.sh' >/dev/null 2>&1; then
         fail 'Potential hard-coded signing secret detected.'
+    else
+        pass
+    fi
+
+    if grep -Fq -- 'secrets.SIGNING_KEY' "$ROOT_DIR/.github/workflows/release.yml" \
+        || grep -Fq -- 'secrets.KEY_STORE_PASSWORD' "$ROOT_DIR/.github/workflows/release.yml" \
+        || grep -Fq -- 'secrets.ALIAS' "$ROOT_DIR/.github/workflows/release.yml"; then
+        fail 'Manual release workflow still references retired signing-secret names.'
     else
         pass
     fi
@@ -185,6 +200,7 @@ main() {
     printf 'TRAFFIC:      cellular overlay + background sampler\n'
     printf 'SETTINGS:     immediate read-only UI while app service is pending\n'
     printf 'RESTART GUARD: framework-native only; injected remote state is read-only\n'
+    printf 'RELEASE:      workflow_dispatch + auto-version + signed APK\n'
     printf 'CUTOUT MODE:  retain; clamp opt-in\n'
     printf '==================================================\n'
 
