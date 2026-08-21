@@ -10,7 +10,6 @@ import dev.pixeldenseui.hooks.FrameworkStatusBarHooks;
 import dev.pixeldenseui.hooks.HookUtil;
 import dev.pixeldenseui.hooks.LauncherHooks;
 import dev.pixeldenseui.hooks.SystemUiHooks;
-import dev.pixeldenseui.safety.BootLoopProtector;
 import io.github.libxposed.api.XposedModule;
 import io.github.libxposed.api.XposedModuleInterface;
 
@@ -38,12 +37,6 @@ public final class ModuleMain extends XposedModule {
             return;
         }
 
-        if (BootLoopProtector.shouldSkip(prefs, "system")) {
-            HookUtil.logWarning(this,
-                    "bootloop guard: skipping system_server hooks for this restart window");
-            return;
-        }
-
         ModuleConfig config = new ModuleConfig(prefs);
         HookUtil.installSafely(this, "framework status-bar hooks",
                 () -> new FrameworkStatusBarHooks(this, param.getClassLoader(), config).install());
@@ -66,13 +59,6 @@ public final class ModuleMain extends XposedModule {
             return;
         }
 
-        String guardTarget = guardTarget(packageName, processName);
-        if (BootLoopProtector.shouldSkip(prefs, guardTarget)) {
-            HookUtil.logWarning(this, "bootloop guard: skipping hooks for " + guardTarget
-                    + " in this restart window");
-            return;
-        }
-
         ModuleConfig config = new ModuleConfig(prefs);
         switch (packageName) {
             case "com.android.systemui" ->
@@ -83,13 +69,6 @@ public final class ModuleMain extends XposedModule {
                             () -> new LauncherHooks(this, param.getClassLoader(), config).install());
             default -> { }
         }
-    }
-
-    private static String guardTarget(String packageName, String processName) {
-        if (processName == null || processName.isBlank() || processName.equals(packageName)) {
-            return packageName;
-        }
-        return packageName + "@" + processName;
     }
 
     private SharedPreferences preferencesOrNull() {
