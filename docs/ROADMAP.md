@@ -30,7 +30,7 @@ Promotion requires no material shade-jank regression versus mode Off and correct
 
 **Status:** first stage implemented.
 
-The settings screen now reports source/build identity, actual framework scope and whether the current build has reached system_server, main SystemUI, screenshot child and Pixel Launcher. A later stage may report each optional private class/method target individually.
+The settings screen reports source/build identity, connected framework/API and approved scope. Host-process reachability is intentionally verified separately from Vector module-load/runtime logs and the maintained validation collector rather than by injected hosts writing synthetic preference markers. A later stage may expose authoritative running-target/private-hook state directly if the supported module-app service API can do so without widening the Android SDK boundary solely for diagnostics.
 
 ## P2 — Optional Magisk/RRO benchmark
 
