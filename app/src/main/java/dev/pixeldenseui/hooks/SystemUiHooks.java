@@ -3,6 +3,8 @@
  */
 package dev.pixeldenseui.hooks;
 
+import java.util.Locale;
+
 import dev.pixeldenseui.config.ModuleConfig;
 import io.github.libxposed.api.XposedModule;
 
@@ -20,7 +22,7 @@ public final class SystemUiHooks {
     }
 
     public void install() {
-        if (processName.toLowerCase().contains("screenshot")) {
+        if (processName.toLowerCase(Locale.ROOT).contains("screenshot")) {
             HookUtil.installSafely(module, "screenshot sound hooks",
                     () -> new ScreenshotHooks(module, cl, config).install());
             return;
