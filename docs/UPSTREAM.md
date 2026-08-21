@@ -67,16 +67,18 @@ Pixel Dense UI intentionally **excludes** PixelXpert's aggressive `NO_CUTOUT` be
 
 Pixel Dense UI does not include PixelXpert's unrelated unrestricted-screenshot functionality.
 
-### Hook safety / restart protection
+### Hook safety / restart-protection research
 
 - `xposed/utils/reflection/HookHelper.java`
   - hook registration enumerates only the target class's declared methods.
 - `xposed/utils/reflection/ReflectedClass.java`
   - optional class lookup and version-drift fallback concepts.
 - `xposed/utils/BootLoopProtector.java`
-  - short restart-window strikes and hook suppression concepts.
+  - short restart-window strike/suppression design was reviewed as a reference pattern.
 - `xposed/XPLauncher.java`
   - independent mod-pack loading so one failed feature family does not prevent unrelated hooks from loading.
+
+PixelDenseUI does **not** currently implement the preference-backed restart-strike mechanism. Vector deliberately gives injected processes a read-only module service: they can read remote preferences/files but cannot persist trusted module state. A previous adaptation attempted to write strike counters through injected remote preferences, which could not work under that contract and was removed during PR #6 hardening rather than retaining a misleading no-op safety feature. Independent fail-soft hook packs remain the active recovery boundary.
 
 ### Status icon ignore — roadmap reference only
 
@@ -93,7 +95,7 @@ Pixel Dense UI does not copy PixelXpert's complete proxy/root-service, updater o
 2. each major hook family has an independent installation boundary;
 3. optional reflection targets fail soft for that feature only;
 4. framework hooks retain local exception boundaries;
-5. restart protection is process-qualified so `com.android.systemui:screenshot` cannot accumulate strikes against main SystemUI;
+5. injected-process startup does not pretend read-only Vector remote preferences can store restart strikes;
 6. screenshot `MediaPlayer` suppression is installed only in the screenshot child process;
 7. inserted views receive parent-compatible layout params;
 8. status-icon ignore remains roadmap-only until a reliable Android 16 slot-level path is verified.
@@ -104,7 +106,7 @@ Repository: <https://github.com/Mahmud0808/Iconify>
 
 The 2026 Android 16 implementation independently corroborated the Compose-QS repository/resource-wrapper approach used by PixelXpert. Pixel Dense UI uses Iconify as a confirming implementation reference; unrelated theming/customisation code is not included.
 
-## libxposed
+## libxposed / Vector
 
 Organisation/API: <https://github.com/libxposed>
 
@@ -114,8 +116,9 @@ Reference projects:
 - <https://github.com/libxposed/service>
 - <https://github.com/libxposed/example>
 - <https://github.com/JingMatrix/libxposed-example>
+- <https://github.com/JingMatrix/Vector>
 
-Pixel Dense UI targets **libxposed API 101** and uses the modern static-scope/module-entry model. The official libxposed projects and JingMatrix's current API-100+ example were used to align module structure, service-backed remote preferences and `module.hook(...).intercept(...)` usage with the modern API.
+Pixel Dense UI targets **libxposed API 101** and uses the modern static-scope/module-entry model. The official libxposed projects, JingMatrix's current API-100+ example and Vector's app-vs-injected service split were used to align module structure, service-backed remote preferences and `module.hook(...).intercept(...)` usage with the modern API. Vector's injected-process service is explicitly read-only; writable configuration belongs to the module-app service.
 
 ## LSPosed / Xposed ecosystem
 
@@ -162,4 +165,4 @@ See [DEVELOPMENT.md](DEVELOPMENT.md) for the maintained release contract.
 
 ## Acknowledgement
 
-Thank you to the maintainers and contributors of **PixelXpert, Pixel Taskbar Enabler, Iconify, libxposed, JingMatrix's libxposed example, LSPosed and AOSP**. Pixel Dense UI would be substantially harder to build and maintain without their published code, documentation and accumulated platform knowledge.
+Thank you to the maintainers and contributors of **PixelXpert, Pixel Taskbar Enabler, Iconify, libxposed, JingMatrix's libxposed example and Vector, LSPosed and AOSP**. Pixel Dense UI would be substantially harder to build and maintain without their published code, documentation and accumulated platform knowledge.
