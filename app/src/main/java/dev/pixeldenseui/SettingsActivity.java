@@ -95,8 +95,11 @@ public final class SettingsActivity extends Activity {
             }
 
             @Override public void onServiceDied(XposedService dead) {
-                if (service == dead) service = null;
                 runOnUiThread(() -> {
+                    // Vector may replace the app-service Binder before the old Binder's death
+                    // callback is delivered. Never let a stale callback disconnect a newer bind.
+                    if (service != dead) return;
+                    service = null;
                     prefs = null;
                     status.setText("Xposed app service disconnected. Controls are read-only until "
                             + "Vector reconnects; host hooks are a separate process path.");
