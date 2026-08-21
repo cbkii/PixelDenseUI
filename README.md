@@ -81,12 +81,13 @@ The redesigned path no longer performs recursive notification tree walking from 
 
 ## 🧪 Runtime diagnostics
 
-The settings screen reports:
+The settings screen reports the state it can obtain authoritatively from the module-app Xposed service:
 
 - app version/code and build source revision;
-- connected framework name/version/API;
-- actual approved scope;
-- whether the current PixelDenseUI build has reached `system_server`, main SystemUI, the screenshot child process and Pixel Launcher.
+- connected framework name/version/API and service-bind latency;
+- actual approved scope.
+
+Host-process reachability (`system_server`, main SystemUI, screenshot child and Pixel Launcher) is verified independently from Vector module-load/runtime logs and the maintained validation collector. PixelDenseUI deliberately does not write synthetic `runtime_*` markers from injected hosts into remote preferences.
 
 One-time PixelDenseUI hook-installation messages are also mirrored to Android logcat as well as the framework log.
 
