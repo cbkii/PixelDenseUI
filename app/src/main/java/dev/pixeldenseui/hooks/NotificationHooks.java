@@ -27,6 +27,7 @@ public final class NotificationHooks {
     private static final int FALLBACK_BUCKET_SILENT = 6;
     private static final String CONTENT_VIEW =
             "com.android.systemui.statusbar.notification.row.NotificationContentView";
+    private static final String EXTRA_CONTAINS_CUSTOM_VIEW = "android.contains.customView";
 
     private final XposedModule module;
     private final ClassLoader cl;
@@ -219,13 +220,24 @@ public final class NotificationHooks {
                         || lower.contains("decoratedcustomviewstyle")) {
                     return true;
                 }
+
+                // BigText/BigPicture/Inbox use the ordinary contracted notification layout and
+                // are safe candidates. Keep unknown style templates stock until mapped.
+                boolean supportedStandardStyle = lower.contains("bigtextstyle")
+                        || lower.contains("bigpicturestyle")
+                        || lower.contains("inboxstyle");
+                if (!supportedStandardStyle) return true;
             }
 
             if (extras != null && extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0) {
                 return true;
             }
 
-            return template == null && notification.contentView != null;
+            // Android marks app-supplied custom RemoteViews explicitly. A non-null contentView
+            // alone is not proof of custom content: ordinary legacy/plain notifications commonly
+            // expose one without EXTRA_TEMPLATE, and excluding all of them makes Silent/All appear
+            // to do nothing on otherwise supported rows.
+            return extras != null && extras.getBoolean(EXTRA_CONTAINS_CUSTOM_VIEW, false);
         } catch (Throwable ignored) {
             return true;
         }
