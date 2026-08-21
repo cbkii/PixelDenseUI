@@ -9,7 +9,9 @@ package dev.pixeldenseui.hooks;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 
+import java.util.Collections;
 import java.util.Map;
+import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 import dev.pixeldenseui.config.ModuleConfig;
@@ -19,10 +21,18 @@ public final class SystemUiResourceHooks {
     private static final String SYSTEMUI_PACKAGE = "com.android.systemui";
     private static final String ANDROID_PACKAGE = "android";
 
+    /**
+     * Resource IDs are only unique inside one resource table. SystemUI can call these
+     * process-wide Resources hooks through multiple package/configuration tables, so an
+     * ID-only cache can reuse a name from the wrong table. Keep a weak per-Resources
+     * cache to avoid both cross-table aliasing and retaining obsolete configurations.
+     */
+    private final Map<Resources, Map<Integer, ResourceKey>> resourceKeyCache =
+            Collections.synchronizedMap(new WeakHashMap<>());
+
     private final XposedModule module;
     private final ClassLoader cl;
     private final ModuleConfig config;
-    private final Map<Integer, ResourceKey> resourceKeyCache = new ConcurrentHashMap<>();
 
     public SystemUiResourceHooks(XposedModule module, ClassLoader cl, ModuleConfig config) {
         this.module = module;
@@ -153,7 +163,15 @@ public final class SystemUiResourceHooks {
     }
 
     private ResourceKey resourceKey(Resources resources, int id) {
-        return resourceKeyCache.computeIfAbsent(id, ignored -> new ResourceKey(
+        Map<Integer, ResourceKey> perResources;
+        synchronized (resourceKeyCache) {
+            perResources = resourceKeyCache.get(resources);
+            if (perResources == null) {
+                perResources = new ConcurrentHashMap<>();
+                resourceKeyCache.put(resources, perResources);
+            }
+        }
+        return perResources.computeIfAbsent(id, ignored -> new ResourceKey(
                 HookUtil.resourcePackageName(resources, id),
                 HookUtil.resourceEntryName(resources, id)));
     }
